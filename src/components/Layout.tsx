@@ -3,6 +3,8 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { TestnetBanner } from "./TestnetBanner";
 import { EthConnectButton } from "./EthConnectButton";
+import { SolConnectButton } from "./SolConnectButton";
+import { useOpaqueSession } from "../opaque/useOpaqueSession";
 
 export type Tab =
   | "dashboard"
@@ -21,10 +23,6 @@ export type Tab =
 type LayoutProps = {
   tab: Tab;
   onTabChange: (t: Tab) => void;
-  isConnected: boolean;
-  address: string | undefined;
-  isConnecting: boolean;
-  onConnect: () => void;
   onDisconnect: () => void;
   children: ReactNode;
   protocolLog: ReactNode;
@@ -35,15 +33,9 @@ const navItems: { id: Tab; label: string }[] = [];
 function DesktopNav({
   tab,
   onTabChange,
-  isConnected,
-  address,
-  isConnecting,
-  onConnect,
   onDisconnect,
-}: Pick<
-  LayoutProps,
-  "tab" | "onTabChange" | "isConnected" | "address" | "isConnecting" | "onConnect" | "onDisconnect"
->) {
+}: Pick<LayoutProps, "tab" | "onTabChange" | "onDisconnect">) {
+  const { isSetup, metaAddress } = useOpaqueSession();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -101,18 +93,9 @@ function DesktopNav({
         </div>
 
         <div className="relative flex items-center gap-3" ref={dropdownRef}>
+          <SolConnectButton />
           <EthConnectButton />
-          {!isConnected && (
-            <button
-              type="button"
-              onClick={onConnect}
-              disabled={isConnecting}
-              className="rounded-lg bg-sol-gradient px-4 py-1.5 text-sm font-semibold text-white transition-all hover:shadow-[0_0_20px_rgba(153,69,255,0.3)] hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {isConnecting ? "Connecting…" : "Connect"}
-            </button>
-          )}
-          {isConnected && address && (
+          {isSetup && metaAddress && (
             <>
               <div
                 role="button"
@@ -128,7 +111,7 @@ function DesktopNav({
                 data-tour="meta"
               >
                 <img
-                  src={`https://robohash.org/${address}`}
+                  src={`https://robohash.org/${metaAddress}`}
                   alt=""
                   className="h-7 w-7 rounded-full bg-ink-800"
                 />
@@ -209,31 +192,21 @@ const pageVariants = {
 export function Layout({
   tab,
   onTabChange,
-  isConnected,
-  address,
-  isConnecting,
-  onConnect,
   onDisconnect,
   children,
   protocolLog: _protocolLog,
 }: LayoutProps) {
+  const { connectedChains } = useOpaqueSession();
+  const anyConnected = connectedChains.length > 0;
   return (
     <div className="min-h-dvh flex flex-col bg-ink-950 bg-grid-fade bg-size-grid">
       {/* ── Fixed header ── */}
       <div className="hidden md:flex flex-col fixed top-0 left-0 right-0 z-20">
-        <TestnetBanner isConnected={isConnected} />
-        <DesktopNav
-          tab={tab}
-          onTabChange={onTabChange}
-          isConnected={isConnected}
-          address={address}
-          isConnecting={isConnecting}
-          onConnect={onConnect}
-          onDisconnect={onDisconnect}
-        />
+        <TestnetBanner isConnected={anyConnected} />
+        <DesktopNav tab={tab} onTabChange={onTabChange} onDisconnect={onDisconnect} />
       </div>
       <div className="md:hidden">
-        <TestnetBanner isConnected={isConnected} />
+        <TestnetBanner isConnected={anyConnected} />
       </div>
 
       {/* ── Content ── */}

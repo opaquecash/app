@@ -1,20 +1,24 @@
 /**
- * The single bridge between the wallet layer and the protocol. Builds one `OpaqueClient` from the
- * user's Solana-wallet signature over the canonical `SETUP_MESSAGE` (HKDF entropy for their keys)
- * and stores it. All protocol behaviour comes from `@opaquecash/opaque`.
+ * The single bridge between the wallet layer and the protocol. Builds one `OpaqueClient` from a
+ * wallet signature over the canonical `SETUP_MESSAGE` (HKDF entropy for the stealth keys) and
+ * stores it. All protocol behaviour comes from `@opaquecash/opaque`.
  *
- * Solana-primary: the meta-address is derived from the Solana signature (matching the legacy
- * `KeysContext` flow byte-for-byte, so existing identities are preserved). An Ethereum wallet is
- * optional — when connected it is threaded in as the EVM write signer for multichain features.
- * The 30-minute encrypted signature cache (`lib/signatureSession`) is reused so users don't re-sign.
+ * Chain-neutral: the user derives keys from whichever wallet they choose — Ethereum
+ * (`personal_sign` via wagmi) or Solana (`signMessage` via the wallet adapter). The two
+ * signatures produce DIFFERENT keys (different HKDF inputs), so the derivation source is an
+ * explicit identity choice, never silently switched. Both chains' signers are threaded into the
+ * client whenever their wallet is connected; writes on a chain require that chain's wallet
+ * (`canActOn`). The 30-minute encrypted signature cache (`lib/signatureSession`) avoids re-signing.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useConnection, useWallet as useSolanaWallet } from "@solana/wallet-adapter-react";
 import { useAccount, useWalletClient } from "wagmi";
 import { OpaqueClient, SETUP_MESSAGE } from "@opaquecash/opaque";
+import type { Connection } from "@solana/web3.js";
+import type { PublicKey, Transaction } from "@solana/web3.js";
 import type { Address, Hex } from "viem";
-import { useOpaqueStore } from "./store";
+import { useOpaqueStore, type DerivationSource } from "./store";
 import {
   clearSignatureSession,
   getRememberSignaturePreference,
@@ -22,6 +26,7 @@ import {
   saveSignatureSession,
 } from "../lib/signatureSession";
 import {
+  ETHEREUM_SESSION_SCOPE,
   PLACEHOLDER_EVM_ADDRESS,
   SEPOLIA_CHAIN_ID,
   SEPOLIA_RPC_URL,
@@ -30,67 +35,138 @@ import {
   WASM_MODULE_SPECIFIER,
 } from "./config";
 
+export type OpaqueChain = "ethereum" | "solana";
+
 function sigBytesToHex(sigBytes: Uint8Array): Hex {
   return `0x${Array.from(sigBytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")}` as Hex;
 }
 
+type Signers = {
+  connection: Connection;
+  ethereumAddress: Address | undefined;
+  walletClient: unknown;
+  publicKey: PublicKey | null;
+  signTransaction: ((tx: Transaction) => Promise<Transaction>) | undefined;
+};
+
+/** Identifies which signers a client was built with, so wallet changes trigger a rebuild. */
+function fingerprintSigners(s: Signers): string {
+  return [
+    s.ethereumAddress ?? "-",
+    s.walletClient ? "wc" : "-",
+    s.publicKey?.toBase58() ?? "-",
+    s.signTransaction ? "st" : "-",
+  ].join("|");
+}
+
+async function buildClient(signature: Hex, s: Signers): Promise<OpaqueClient> {
+  // The app and the file:-linked SDK resolve separate copies of viem, so the structurally
+  // identical WalletClient types are nominally distinct; cast across this one boundary.
+  const ethereumWalletClient = (s.walletClient ?? undefined) as Parameters<
+    typeof OpaqueClient.create
+  >[0]["ethereumWalletClient"];
+  return OpaqueClient.create({
+    chainId: SEPOLIA_CHAIN_ID,
+    rpcUrl: SEPOLIA_RPC_URL,
+    walletSignature: signature,
+    // Real address only when an Ethereum wallet is connected; the placeholder keeps reads
+    // working for Solana-only sessions and is never used for writes.
+    ethereumAddress: (s.ethereumAddress ?? PLACEHOLDER_EVM_ADDRESS) as Address,
+    wasmModuleSpecifier: WASM_MODULE_SPECIFIER,
+    solana: { cluster: SOLANA_CLUSTER, rpcUrl: SOLANA_RPC_URL, connection: s.connection },
+    ethereumWalletClient,
+    solanaWallet:
+      s.publicKey && s.signTransaction
+        ? { publicKey: s.publicKey, signTransaction: s.signTransaction }
+        : undefined,
+  });
+}
+
 export function useOpaqueSession() {
   const { connection } = useConnection();
   const { publicKey, signMessage, signTransaction } = useSolanaWallet();
-  // Optional EVM signer for multichain (PSR/register/send/UAB on Ethereum).
   const { address: ethereumAddress } = useAccount();
   const { data: walletClient } = useWalletClient();
 
   const client = useOpaqueStore((s) => s.client);
   const metaAddress = useOpaqueStore((s) => s.metaAddress);
   const status = useOpaqueStore((s) => s.status);
+  const derivationSource = useOpaqueStore((s) => s.derivationSource);
+  const entered = useOpaqueStore((s) => s.entered);
   const setSession = useOpaqueStore((s) => s.setSession);
+  const setEntered = useOpaqueStore((s) => s.setEntered);
   const clearSession = useOpaqueStore((s) => s.clearSession);
   const setStatus = useOpaqueStore((s) => s.setStatus);
 
   const connect = useCallback(
-    async (opts?: { remember?: boolean }): Promise<OpaqueClient> => {
-      if (!publicKey || !signMessage || !signTransaction) {
-        throw new Error("Connect a Solana wallet (Phantom / Solflare) first.");
-      }
-      const address = publicKey.toBase58();
-      setStatus("Restoring session…");
-      let sigHex = await loadSignatureSession({
-        address,
-        cluster: SOLANA_CLUSTER,
-        message: SETUP_MESSAGE,
-      });
-      if (!sigHex) {
-        setStatus("Requesting signature over SETUP_MESSAGE…");
-        const sigBytes = await signMessage(new TextEncoder().encode(SETUP_MESSAGE));
-        sigHex = sigBytesToHex(sigBytes);
-        await saveSignatureSession({
-          signatureHex: sigHex,
+    async (opts: { derivationSource: DerivationSource; remember?: boolean }): Promise<OpaqueClient> => {
+      const source = opts.derivationSource;
+      let sigHex: Hex | null = null;
+
+      if (source === "solana") {
+        if (!publicKey || !signMessage) {
+          throw new Error("Connect a Solana wallet (Phantom / Solflare) to derive keys from it.");
+        }
+        const address = publicKey.toBase58();
+        setStatus("Restoring session…");
+        sigHex = await loadSignatureSession({
           address,
           cluster: SOLANA_CLUSTER,
           message: SETUP_MESSAGE,
-          remember: opts?.remember ?? getRememberSignaturePreference(),
         });
+        if (!sigHex) {
+          setStatus("Requesting signature over SETUP_MESSAGE…");
+          const sigBytes = await signMessage(new TextEncoder().encode(SETUP_MESSAGE));
+          sigHex = sigBytesToHex(sigBytes);
+          await saveSignatureSession({
+            signatureHex: sigHex,
+            address,
+            cluster: SOLANA_CLUSTER,
+            message: SETUP_MESSAGE,
+            remember: opts.remember ?? getRememberSignaturePreference(),
+          });
+        }
+      } else {
+        if (!ethereumAddress || !walletClient) {
+          throw new Error("Connect an Ethereum wallet (MetaMask or another injected wallet) to derive keys from it.");
+        }
+        setStatus("Restoring session…");
+        sigHex = await loadSignatureSession({
+          address: ethereumAddress,
+          cluster: ETHEREUM_SESSION_SCOPE,
+          message: SETUP_MESSAGE,
+        });
+        if (!sigHex) {
+          setStatus("Requesting signature over SETUP_MESSAGE…");
+          sigHex = (await walletClient.signMessage({ message: SETUP_MESSAGE })) as Hex;
+          await saveSignatureSession({
+            signatureHex: sigHex,
+            address: ethereumAddress,
+            cluster: ETHEREUM_SESSION_SCOPE,
+            message: SETUP_MESSAGE,
+            remember: opts.remember ?? getRememberSignaturePreference(),
+          });
+        }
       }
+
       setStatus("Deriving stealth keys + loading scanner…");
-      // The app and the file:-linked SDK resolve separate copies of viem, so the structurally
-      // identical WalletClient types are nominally distinct; cast across this one boundary.
-      const ethereumWalletClient = (walletClient ?? undefined) as unknown as Parameters<
-        typeof OpaqueClient.create
-      >[0]["ethereumWalletClient"];
-      const c = await OpaqueClient.create({
-        chainId: SEPOLIA_CHAIN_ID,
-        rpcUrl: SEPOLIA_RPC_URL,
+      const s: Signers = {
+        connection,
+        ethereumAddress,
+        walletClient: walletClient ?? null,
+        publicKey,
+        signTransaction,
+      };
+      const c = await buildClient(sigHex, s);
+      setSession({
+        client: c,
+        metaAddress: c.getMetaAddressHex(),
+        derivationSource: source,
         walletSignature: sigHex,
-        ethereumAddress: (ethereumAddress ?? PLACEHOLDER_EVM_ADDRESS) as Address,
-        wasmModuleSpecifier: WASM_MODULE_SPECIFIER,
-        solana: { cluster: SOLANA_CLUSTER, rpcUrl: SOLANA_RPC_URL, connection },
-        ethereumWalletClient,
-        solanaWallet: { publicKey, signTransaction: (tx) => signTransaction(tx) },
+        signerFingerprint: fingerprintSigners(s),
       });
-      setSession(c, c.getMetaAddressHex());
       setStatus(null);
       return c;
     },
@@ -111,14 +187,81 @@ export function useOpaqueSession() {
     clearSession();
   }, [clearSession]);
 
+  /** Whether write actions on `chain` are possible — requires that chain's wallet connected. */
+  const canActOn = useCallback(
+    (chain: OpaqueChain): boolean => {
+      if (chain === "ethereum") return ethereumAddress != null && walletClient != null;
+      return publicKey != null && signTransaction != null;
+    },
+    [ethereumAddress, walletClient, publicKey, signTransaction],
+  );
+
+  const connectedChains: OpaqueChain[] = [
+    ...(publicKey != null ? (["solana"] as const) : []),
+    ...(ethereumAddress != null ? (["ethereum"] as const) : []),
+  ];
+
   return {
     client,
     metaAddress,
     status,
     isSetup: client != null,
+    entered,
+    setEntered,
+    derivationSource,
+    connectedChains,
+    canActOn,
     solanaAddress: publicKey?.toBase58() ?? null,
     ethereumAddress: ethereumAddress ?? null,
     connect,
     disconnect,
   };
+}
+
+/**
+ * Mount ONCE (in App) to keep the client's signers in sync with the connected wallets: when a
+ * wallet connects or disconnects after the session exists, the client is rebuilt from the cached
+ * in-memory signature — same keys, fresh signers, no new signature prompt.
+ */
+export function useOpaqueSessionSync() {
+  const { connection } = useConnection();
+  const { publicKey, signTransaction } = useSolanaWallet();
+  const { address: ethereumAddress } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  const rebuildingRef = useRef(false);
+
+  const client = useOpaqueStore((s) => s.client);
+  const walletSignature = useOpaqueStore((s) => s.walletSignature);
+  const signerFingerprint = useOpaqueStore((s) => s.signerFingerprint);
+  const replaceClient = useOpaqueStore((s) => s.replaceClient);
+
+  useEffect(() => {
+    if (!client || !walletSignature) return;
+    const s: Signers = {
+      connection,
+      ethereumAddress,
+      walletClient: walletClient ?? null,
+      publicKey,
+      signTransaction,
+    };
+    const next = fingerprintSigners(s);
+    if (next === signerFingerprint || rebuildingRef.current) return;
+    rebuildingRef.current = true;
+    void buildClient(walletSignature, s)
+      .then((c) => replaceClient(c, next))
+      .catch((e) => console.error("[Opaque] client rebuild after wallet change failed:", e))
+      .finally(() => {
+        rebuildingRef.current = false;
+      });
+  }, [
+    client,
+    walletSignature,
+    signerFingerprint,
+    connection,
+    ethereumAddress,
+    walletClient,
+    publicKey,
+    signTransaction,
+    replaceClient,
+  ]);
 }

@@ -1,7 +1,7 @@
 /**
- * Optional Ethereum (Sepolia) wallet connect, used for the multichain paths — EVM PSR, EVM send,
- * UAB relay, and cross-chain scan. Solana stays the primary wallet; this only lights up the EVM
- * side when the user opts in. Uses wagmi's injected connector.
+ * Ethereum (Sepolia) wallet connect/disconnect, peer to `SolConnectButton`. Connecting it lights
+ * up the Ethereum-side actions — register, send, scan, sweep, PSR, and UAB relay. Uses wagmi's
+ * injected connector.
  */
 
 import { useAccount, useConnect, useDisconnect } from "wagmi";
@@ -33,7 +33,7 @@ export function EthConnectButton() {
       type="button"
       onClick={() => connect({ connector: injected() })}
       disabled={isPending}
-      title="Connect an Ethereum wallet for multichain features"
+      title="Connect an Ethereum wallet for Ethereum-side actions"
       className="rounded-lg border border-ink-600 bg-ink-900/60 px-3 py-1.5 text-xs font-medium text-mist transition-colors hover:border-sol-purple/30 hover:text-white disabled:opacity-50"
     >
       {isPending ? "Connecting…" : "Connect ETH"}

@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useOpaqueSession } from "./opaque/useOpaqueSession";
+import { useOpaqueSession, useOpaqueSessionSync } from "./opaque/useOpaqueSession";
 import { hasCompletedOnboardingTour, runOnboardingTour } from "./lib/onboardingTour";
 import { ProtocolLogProvider } from "./context/ProtocolLogContext";
 import { ToastProvider, useToast } from "./context/ToastContext";
@@ -19,8 +19,9 @@ import { MyTraitsView } from "./components/MyTraitsView";
 import { ManageView } from "./components/ManageView";
 import { Layout, type Tab } from "./components/Layout";
 import { NetworkGuard } from "./components/NetworkGuard";
-import { useWallet } from "./hooks/useWallet";
+import { useConnectedWallets } from "./hooks/useConnectedWallets";
 import { useRegistrationStatus } from "./hooks/useRegistrationStatus";
+import { getCluster } from "./lib/chain";
 import { useVaultStore } from "./store/vaultStore";
 import { useGhostAddressStore, useGhostAddressPersistence } from "./store/ghostAddressStore";
 import { getExplorerTxUrl } from "./lib/explorer";
@@ -30,9 +31,15 @@ function AppContent() {
   const [registrationJustCompleted, setRegistrationJustCompleted] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { isConnected, address, cluster, isConnecting, connect, disconnect } = useWallet();
-  const { isSetup, disconnect: clearSession } = useOpaqueSession();
-  const { isRegistered, isLoading: isRegistrationCheckLoading } = useRegistrationStatus(address, cluster);
+  const wallets = useConnectedWallets();
+  const { isSetup, entered, connectedChains, disconnect: clearSession } = useOpaqueSession();
+  useOpaqueSessionSync();
+  const cluster = getCluster();
+  const {
+    byChain: registrationByChain,
+    allRegistered,
+    isLoading: isRegistrationCheckLoading,
+  } = useRegistrationStatus(connectedChains);
   const clearVault = useVaultStore((s) => s.clear);
 
   useGhostAddressPersistence();
@@ -53,22 +60,23 @@ function AppContent() {
     setRegistrationJustCompleted(false);
   }, [cluster]);
 
-  const showDashboard = isRegistered || registrationJustCompleted;
-  const showRegistrationWizard = isSetup && isConnected && address && cluster != null && !showDashboard && !isRegistrationCheckLoading;
+  const showDashboard = allRegistered || registrationJustCompleted;
+  const showRegistrationWizard =
+    isSetup && entered && connectedChains.length > 0 && !showDashboard && !isRegistrationCheckLoading;
 
-  const handleRegistrationComplete = useCallback(() => {
+  const handleRegistrationComplete = () => {
     setRegistrationJustCompleted(true);
-  }, []);
+  };
 
   const handleTab = (t: Tab) => {
     setTab(t);
   };
 
   useEffect(() => {
-    if (tab !== "dashboard" || !isConnected || !isSetup || hasCompletedOnboardingTour()) return;
+    if (tab !== "dashboard" || !wallets.anyConnected || !isSetup || hasCompletedOnboardingTour()) return;
     const timer = setTimeout(() => runOnboardingTour(), 600);
     return () => clearTimeout(timer);
-  }, [tab, isConnected, isSetup]);
+  }, [tab, wallets.anyConnected, isSetup]);
 
   useEffect(() => {
     if (!registrationJustCompleted || tab !== "dashboard") return;
@@ -76,23 +84,17 @@ function AppContent() {
     return () => clearTimeout(timer);
   }, [registrationJustCompleted, tab]);
 
-  const handleConnect = useCallback(async () => {
-    try {
-      await connect();
-    } catch (e) {
-      console.error("[App] Wallet connect failed:", e);
-    }
-  }, [connect]);
-
   const handleDisconnect = () => {
     clearSession();
     clearVault();
-    disconnect();
+    if (wallets.solana.connected) wallets.solana.disconnect();
+    if (wallets.ethereum.connected) wallets.ethereum.disconnect();
     setTab("dashboard");
   };
 
   const renderView = () => {
-    if (tab === "dashboard") return <DashboardView onNavigate={setTab} address={address ?? undefined} cluster={cluster} />;
+    if (tab === "dashboard")
+      return <DashboardView onNavigate={setTab} address={wallets.solana.address ?? undefined} cluster={cluster} />;
     if (tab === "send") return <SendView />;
     if (tab === "receive") return <ReceiveView onBack={() => setTab("dashboard")} />;
     if (tab === "balance") return <PrivateBalanceView />;
@@ -106,7 +108,7 @@ function AppContent() {
     return null;
   };
 
-  if (!isSetup) {
+  if (!isSetup || !entered) {
     return (
       <div className="min-h-dvh flex flex-col bg-ink-950 bg-grid-fade bg-size-grid">
         <LandingView />
@@ -116,16 +118,7 @@ function AppContent() {
 
   if (isRegistrationCheckLoading) {
     return (
-      <Layout
-        tab="dashboard"
-        onTabChange={handleTab}
-        isConnected={isConnected}
-        address={address ?? undefined}
-        isConnecting={isConnecting}
-        onConnect={handleConnect}
-        onDisconnect={handleDisconnect}
-        protocolLog={<ProtocolLogPanel />}
-      >
+      <Layout tab="dashboard" onTabChange={handleTab} onDisconnect={handleDisconnect} protocolLog={<ProtocolLogPanel />}>
         <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
           <span className="h-7 w-7 animate-spin rounded-full border-2 border-ink-600 border-t-glow" aria-hidden />
           <p className="text-sm text-mist">Authenticating with protocol…</p>
@@ -136,32 +129,14 @@ function AppContent() {
 
   if (showRegistrationWizard) {
     return (
-      <Layout
-        tab={tab}
-        onTabChange={handleTab}
-        isConnected={isConnected}
-        address={address ?? undefined}
-        isConnecting={isConnecting}
-        onConnect={handleConnect}
-        onDisconnect={handleDisconnect}
-        protocolLog={<ProtocolLogPanel />}
-      >
-        <RegistrationWizard onComplete={handleRegistrationComplete} />
+      <Layout tab={tab} onTabChange={handleTab} onDisconnect={handleDisconnect} protocolLog={<ProtocolLogPanel />}>
+        <RegistrationWizard byChain={registrationByChain} onComplete={handleRegistrationComplete} />
       </Layout>
     );
   }
 
   return (
-    <Layout
-      tab={tab}
-      onTabChange={handleTab}
-      isConnected={isConnected}
-      address={address ?? undefined}
-      isConnecting={isConnecting}
-      onConnect={handleConnect}
-      onDisconnect={handleDisconnect}
-      protocolLog={<ProtocolLogPanel />}
-    >
+    <Layout tab={tab} onTabChange={handleTab} onDisconnect={handleDisconnect} protocolLog={<ProtocolLogPanel />}>
       <NetworkGuard>{renderView()}</NetworkGuard>
     </Layout>
   );

@@ -1,27 +1,39 @@
 /**
- * Checks whether the connected wallet has a stealth meta-address registered on Solana, via the
- * active `OpaqueClient`. Re-runs when the client, address, or cluster changes.
+ * Checks whether the session's stealth meta-address is registered on each CONNECTED chain, via
+ * the active `OpaqueClient`. Chains without a connected wallet are not checked (the SDK reads the
+ * connected wallet's registry entry). Re-runs when the client (including signer rebuilds) or the
+ * set of connected chains changes.
  */
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useOpaqueStore } from "../opaque/store";
+import type { OpaqueChain } from "../opaque/useOpaqueSession";
+
+export type RegistrationByChain = Partial<Record<OpaqueChain, boolean>>;
 
 export type RegistrationStatus = {
-  isRegistered: boolean;
+  /** Registration result per connected chain; absent key = chain not connected/checked. */
+  byChain: RegistrationByChain;
+  /** Every connected chain is registered (false when no chain is connected). */
+  allRegistered: boolean;
+  /** At least one connected chain is registered. */
+  anyRegistered: boolean;
   isLoading: boolean;
+  refresh: () => void;
 };
 
-export function useRegistrationStatus(
-  address: string | null,
-  cluster: string | null
-): RegistrationStatus {
+export function useRegistrationStatus(connectedChains: OpaqueChain[]): RegistrationStatus {
   const client = useOpaqueStore((s) => s.client);
-  const [isRegisteredOnChain, setIsRegisteredOnChain] = useState(false);
+  const [byChain, setByChain] = useState<RegistrationByChain>({});
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const chainsKey = connectedChains.join(",");
 
   useEffect(() => {
-    if (!client || !address || cluster == null) {
-      setIsRegisteredOnChain(false);
+    const chains = chainsKey === "" ? [] : (chainsKey.split(",") as OpaqueChain[]);
+    if (!client || chains.length === 0) {
+      setByChain({});
       setIsLoading(false);
       return;
     }
@@ -29,22 +41,32 @@ export function useRegistrationStatus(
     let cancelled = false;
     setIsLoading(true);
 
-    client
-      .isMetaAddressRegistered("solana")
-      .then((registered) => {
-        if (!cancelled) setIsRegisteredOnChain(registered);
-      })
-      .catch(() => {
-        if (!cancelled) setIsRegisteredOnChain(false);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
+    (async () => {
+      const entries = await Promise.all(
+        chains.map(async (chain) => {
+          try {
+            return [chain, await client.isMetaAddressRegistered(chain)] as const;
+          } catch {
+            return [chain, false] as const;
+          }
+        }),
+      );
+      if (!cancelled) {
+        setByChain(Object.fromEntries(entries) as RegistrationByChain);
+        setIsLoading(false);
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [client, address, cluster]);
+  }, [client, chainsKey, refreshKey]);
 
-  return { isRegistered: isRegisteredOnChain, isLoading };
+  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  const chains = chainsKey === "" ? [] : (chainsKey.split(",") as OpaqueChain[]);
+  const allRegistered = chains.length > 0 && chains.every((c) => byChain[c] === true);
+  const anyRegistered = chains.some((c) => byChain[c] === true);
+
+  return { byChain, allRegistered, anyRegistered, isLoading, refresh };
 }
