@@ -3,13 +3,16 @@
  *
  * Generates a Groth16 ZK proof for a discovered reputation trait in the browser via
  * OpaqueClient.generateReputationProof (no private data leaves the device), then submits it to
- * the Solana reputation verifier via client.submitReputationVerification. All crypto lives in
- * the SDK; this component is UI + orchestration only.
+ * the reputation verifier on the selected chain via client.submitReputationVerification. All
+ * crypto lives in the SDK; this component is UI + orchestration only.
  */
 
 import { useState } from "react";
 import type { DiscoveredTrait, ProofData } from "@opaquecash/opaque";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
+import { usePsrChain } from "../hooks/usePsrChain";
+import { getExplorerTxUrl } from "../lib/explorer";
+import { ChainToggle } from "./ChainToggle";
 
 type ProofStep = "setup" | "generating" | "done" | "submitting" | "verified" | "error";
 
@@ -20,6 +23,7 @@ interface ProofGeneratorModalProps {
 
 export function ProofGeneratorModal({ trait, onClose }: ProofGeneratorModalProps) {
   const { client, isSetup } = useOpaqueSession();
+  const { chain, setChain, ethConnected, solConnected } = usePsrChain();
   const [step, setStep] = useState<ProofStep>("setup");
   const [externalNullifier, setExternalNullifier] = useState("");
   const [proof, setProof] = useState<ProofData | null>(null);
@@ -74,7 +78,7 @@ export function ProofGeneratorModal({ trait, onClose }: ProofGeneratorModalProps
     setStep("submitting");
     setError(null);
     try {
-      const { txHash } = await client.submitReputationVerification("solana", {
+      const { txHash } = await client.submitReputationVerification(chain, {
         proofData: proof,
         merkleRoot: proof.publicSignals[0],
         externalNullifier: externalNullifier.trim(),
@@ -156,6 +160,10 @@ export function ProofGeneratorModal({ trait, onClose }: ProofGeneratorModalProps
                   ))}
                 </div>
               </div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-mist">Submit to</p>
+                <ChainToggle value={chain} onChange={setChain} ethConnected={ethConnected} solConnected={solConnected} />
+              </div>
               <div className="flex gap-3">
                 <button type="button" onClick={handleCopy} className="flex-1 rounded-xl border border-ink-700 bg-ink-800 py-2.5 text-sm font-medium text-white hover:bg-ink-700 transition-colors">{copied ? "Copied!" : "Copy Proof"}</button>
                 <button type="button" onClick={handleSubmitOnChain} className="flex-1 rounded-xl bg-sol-purple py-2.5 text-sm font-semibold text-white hover:bg-sol-purple/90 transition-colors">Submit On-Chain</button>
@@ -172,7 +180,7 @@ export function ProofGeneratorModal({ trait, onClose }: ProofGeneratorModalProps
                 <p className="text-sm font-medium text-white">Proof verified on-chain!</p>
               </div>
               {txSig && (
-                <a href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="block text-xs text-sol-purple hover:underline font-mono">{txSig.slice(0, 24)}… ↗</a>
+                <a href={getExplorerTxUrl(txSig, chain) ?? "#"} target="_blank" rel="noopener noreferrer" className="block text-xs text-sol-purple hover:underline font-mono">{txSig.slice(0, 24)}… ↗</a>
               )}
               <button type="button" onClick={onClose} className="w-full rounded-xl border border-ink-700 bg-ink-800 py-2.5 text-sm font-medium text-white hover:bg-ink-700 transition-colors">Done</button>
             </div>

@@ -9,7 +9,8 @@
 import { useState, useId } from "react";
 import { fieldDefsToString, type FieldDef, type FieldType } from "@opaquecash/opaque";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
-import { PsrChainToggle, type PsrChain } from "./PsrChainToggle";
+import { ChainToggle } from "./ChainToggle";
+import { usePsrChain } from "../hooks/usePsrChain";
 
 // =============================================================================
 // Constants
@@ -35,9 +36,9 @@ const RESOLVER_OPTIONS: { value: ResolverType; label: string; description: strin
 // =============================================================================
 
 export function SchemaStudio() {
-  const { client, isSetup, ethereumAddress } = useOpaqueSession();
+  const { client, isSetup } = useOpaqueSession();
 
-  const [psrChain, setPsrChain] = useState<PsrChain>("solana");
+  const { chain: psrChain, setChain: setPsrChain, ethConnected, solConnected } = usePsrChain();
   const [name, setName] = useState("");
   const [fields, setFields] = useState<FieldDef[]>([
     { id: crypto.randomUUID(), name: "", type: "bool" },
@@ -155,7 +156,7 @@ export function SchemaStudio() {
             Define the template for a class of attestations and control who can issue them.
           </p>
         </div>
-        <PsrChainToggle value={psrChain} onChange={setPsrChain} ethConnected={ethereumAddress != null} />
+        <ChainToggle value={psrChain} onChange={setPsrChain} ethConnected={ethConnected} solConnected={solConnected} />
       </div>
 
       {/* Schema Name */}

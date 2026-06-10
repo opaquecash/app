@@ -11,7 +11,8 @@ import type { OpaqueClient, SchemaV2, AttestationV2 } from "@opaquecash/opaque";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import type { Tab } from "./Layout";
 import { ModalShell } from "./ModalShell";
-import { PsrChainToggle, type PsrChain } from "./PsrChainToggle";
+import { ChainToggle, type ToggleChain as PsrChain } from "./ChainToggle";
+import { usePsrChain } from "../hooks/usePsrChain";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -210,8 +211,8 @@ interface ManageViewProps {
 }
 
 export function ManageView({ onNavigate }: ManageViewProps = {}) {
-  const { client, isSetup, ethereumAddress } = useOpaqueSession();
-  const [psrChain, setPsrChain] = useState<PsrChain>("solana");
+  const { client, isSetup } = useOpaqueSession();
+  const { chain: psrChain, setChain: setPsrChain, ethConnected, solConnected } = usePsrChain();
   const [schemas, setSchemas] = useState<SchemaV2[]>([]);
   const [attestations, setAttestations] = useState<ManagedAttestation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -303,7 +304,7 @@ export function ManageView({ onNavigate }: ManageViewProps = {}) {
           <p className="text-sm text-mist mt-1">Schemas you own and attestations you issued.</p>
         </div>
         <div className="flex items-center gap-2">
-          <PsrChainToggle value={psrChain} onChange={setPsrChain} ethConnected={ethereumAddress != null} />
+          <ChainToggle value={psrChain} onChange={setPsrChain} ethConnected={ethConnected} solConnected={solConnected} />
           {onNavigate && (
             <button type="button" onClick={() => onNavigate("attest")} className="rounded-xl bg-sol-purple px-4 py-2 text-xs font-semibold text-white hover:bg-sol-purple/90 transition-colors">Issue Attestation</button>
           )}

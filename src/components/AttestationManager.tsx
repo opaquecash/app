@@ -13,7 +13,8 @@ import { parseFieldDefs, type SchemaV2 } from "@opaquecash/opaque";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import { useTxHistoryStore } from "../store/txHistoryStore";
 import { getCluster } from "../lib/chain";
-import { PsrChainToggle, type PsrChain } from "./PsrChainToggle";
+import { ChainToggle } from "./ChainToggle";
+import { usePsrChain } from "../hooks/usePsrChain";
 
 interface AttestationManagerProps {
   onNavigate?: (tab: Tab) => void;
@@ -24,7 +25,7 @@ export function AttestationManager({ onNavigate }: AttestationManagerProps = {})
   const pushTx = useTxHistoryStore((s) => s.push);
   const cluster = getCluster();
 
-  const [psrChain, setPsrChain] = useState<PsrChain>("solana");
+  const { chain: psrChain, setChain: setPsrChain, ethConnected, solConnected } = usePsrChain();
   const [schemas, setSchemas] = useState<SchemaV2[]>([]);
   const [isFetchingSchemas, setIsFetchingSchemas] = useState(false);
   const [selectedSchemaId, setSelectedSchemaId] = useState<string>("");
@@ -183,7 +184,7 @@ export function AttestationManager({ onNavigate }: AttestationManagerProps = {})
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <PsrChainToggle value={psrChain} onChange={setPsrChain} ethConnected={ethereumAddress != null} />
+          <ChainToggle value={psrChain} onChange={setPsrChain} ethConnected={ethConnected} solConnected={solConnected} />
           {onNavigate && (
             <button
               type="button"
