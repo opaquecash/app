@@ -1,14 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
-import type { Hex } from "viem";
+import { createPublicClient, http, type Address, type Hex } from "viem";
 import {
   ephemeralPrivateKeyToCompressedPublicKey,
   type UnifiedOwnedOutput,
 } from "@opaquecash/opaque";
-import { formatSol, hexToBytes, bytesToHex, shortenAddress } from "../lib/format";
+import { hexToBytes, bytesToHex, shortenAddress } from "../lib/format";
 import { getRpcUrl, getCluster } from "../lib/chain";
+import { NATIVE_ASSET, formatNativeAmount, type ChainKey } from "../lib/chainAssets";
+import { SEPOLIA_RPC_URL } from "../opaque/config";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
-import { useWallet } from "../hooks/useWallet";
+import { useConnectedWallets } from "../hooks/useConnectedWallets";
 import type { ProtocolStep } from "./ProtocolStepper";
 import { ClaimModal } from "./ClaimModal";
 import { useProtocolLog } from "../context/ProtocolLogContext";
@@ -16,28 +18,38 @@ import { useTxHistoryStore } from "../store/txHistoryStore";
 import { useGhostAddressStore } from "../store/ghostAddressStore";
 import { useWatchlist, useWatchlistStore } from "../hooks/useWatchlist";
 import { useToast } from "../context/ToastContext";
-import { getNativeToken } from "../lib/tokens";
-import type { TokenInfo } from "../lib/tokens";
 import { ExplorerLink } from "./ExplorerLink";
 import { ModalShell } from "./ModalShell";
 
-function isAddress(a: string): boolean {
-  const t = a.trim();
-  if (t.startsWith("0x") && t.length === 42) return /^0x[0-9a-fA-F]{40}$/i.test(t);
+function isEvmAddress(a: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(a.trim());
+}
+
+function isSolanaAddress(a: string): boolean {
   try {
-    new PublicKey(t);
+    new PublicKey(a.trim());
     return true;
   } catch {
     return false;
   }
 }
 
+function isAddressForChain(a: string, chain: ChainKey): boolean {
+  return chain === "ethereum" ? isEvmAddress(a) : isSolanaAddress(a);
+}
+
+function isAddress(a: string): boolean {
+  return isEvmAddress(a) || isSolanaAddress(a);
+}
+
 export type FoundTx = {
   id: string;
+  /** Chain this output lives on. */
+  chain: ChainKey;
   /** Scanner stealth address (0x EVM-style) — used for display + matching. */
   address: string;
-  /** Actual Solana account holding the funds. */
-  solanaAddress?: string;
+  /** Actual account holding the funds (base58 on Solana, 0x on Ethereum). */
+  holderAddress?: string;
   balance: bigint;
   /** 33-byte compressed ephemeral pubkey (hex) the SDK sweeps from. */
   ephemeralPublicKey?: string;
@@ -45,6 +57,8 @@ export type FoundTx = {
   blockNumber: number;
   isSpent?: boolean;
   source: "announcement" | "manual" | "watch";
+  /** How an announced output was discovered: the chain's own announcer or relayed via Wormhole. */
+  announceSource?: "native" | "uab";
 };
 
 /** Build a UnifiedOwnedOutput-shaped record for a ghost's stored ephemeral key (Solana). */
@@ -67,9 +81,11 @@ function ghostOutput(stealthAddress: string, ephemeralPrivKeyHex: string): Unifi
 
 export type PortfolioEntry = { tx: FoundTx; balanceRaw: bigint };
 
+const SCAN_CHAINS: ChainKey[] = ["solana", "ethereum"];
+
 export function PrivateBalanceView() {
   const { client, isSetup } = useOpaqueSession();
-  const { address: mainWalletAddress } = useWallet();
+  const wallets = useConnectedWallets();
   const cluster = getCluster();
   const { push: logPush } = useProtocolLog();
   const pushTx = useTxHistoryStore((s) => s.push);
@@ -94,8 +110,8 @@ export function PrivateBalanceView() {
   const watchlistArchive = useWatchlistStore((s) => s.archive);
   const watchlistAddresses = useWatchlist(cluster);
 
-  const publicClient = useMemo(() => new Connection(getRpcUrl(), "confirmed"), []);
-  const nativeAsset: TokenInfo = getNativeToken();
+  const solanaClient = useMemo(() => new Connection(getRpcUrl(), "confirmed"), []);
+  const evmClient = useMemo(() => createPublicClient({ transport: http(SEPOLIA_RPC_URL) }), []);
 
   const ghostEntries = useMemo(
     () => ghostStoreEntries.filter((e) => e.cluster === cluster && !!e.ephemeralPrivKeyHex),
@@ -103,8 +119,10 @@ export function PrivateBalanceView() {
   );
 
   // Discover announced owned outputs via the SDK (fetch + WASM match + balance, one path).
+  // Both chains are scanned regardless of which wallets are connected — the stealth keys are
+  // chain-neutral, and cross-chain (UAB) announcements are merged in for the unified inbox.
   useEffect(() => {
-    if (!client || cluster == null) {
+    if (!client) {
       setLoading(false);
       return;
     }
@@ -112,21 +130,23 @@ export function PrivateBalanceView() {
     setLoading(true);
     (async () => {
       try {
-        const outputs = await client.scan({ chains: ["solana"], includeCrossChain: false });
+        const outputs = await client.scan({ chains: SCAN_CHAINS });
         const balances = await client.getBalancesForOutputs(outputs);
         if (cancelled) return;
         const txs: FoundTx[] = outputs.map((o, i) => ({
-          id: `${o.transactionHash}-${o.logIndex}`,
+          id: `${o.chain}-${o.transactionHash}-${o.logIndex}`,
+          chain: o.chain,
           address: o.stealthAddress,
-          solanaAddress: balances[i]?.address,
+          holderAddress: balances[i]?.address,
           balance: balances[i]?.nativeRaw ?? 0n,
           ephemeralPublicKey: o.ephemeralPublicKey,
           txHash: o.transactionHash,
           blockNumber: o.blockNumber,
           source: "announcement",
+          announceSource: o.source,
         }));
         setFound(txs);
-        logPush("wasm", `Matched ${txs.length} owned announcement(s)`);
+        logPush("wasm", `Matched ${txs.length} owned announcement(s) across chains`);
       } catch (err) {
         if (!cancelled) console.warn("[Opaque] scan error", err);
       } finally {
@@ -136,7 +156,7 @@ export function PrivateBalanceView() {
     return () => {
       cancelled = true;
     };
-  }, [client, cluster, refreshKey, logPush]);
+  }, [client, refreshKey, logPush]);
 
   // Manual ghost balances (not announced): derive the Solana account + balance from stored keys.
   useEffect(() => {
@@ -151,14 +171,17 @@ export function PrivateBalanceView() {
           ghostOutput(g.stealthAddress, g.ephemeralPrivKeyHex as string),
         );
         const keyed = await client.getBalancesForOutputs(outputs);
-        // View-only watchlist addresses (no stored key): direct balance read.
+        // View-only watchlist addresses (no stored key): direct balance read on their chain.
         const viewOnly = watchlistAddresses.filter(
           (a) => !ghostEntries.some((g) => g.stealthAddress.toLowerCase() === a.toLowerCase()),
         );
         const viewBalances = await Promise.all(
           viewOnly.map(async (addr) => {
             try {
-              return BigInt(await publicClient.getBalance(new PublicKey(addr)));
+              if (isEvmAddress(addr)) {
+                return await evmClient.getBalance({ address: addr as Address });
+              }
+              return BigInt(await solanaClient.getBalance(new PublicKey(addr)));
             } catch {
               return 0n;
             }
@@ -171,8 +194,9 @@ export function PrivateBalanceView() {
           if (balance > 0n) {
             ghostFound.push({
               id: `ghost-${g.stealthAddress}`,
+              chain: "solana",
               address: g.stealthAddress,
-              solanaAddress: keyed[i]?.address,
+              holderAddress: keyed[i]?.address,
               balance,
               ephemeralPublicKey: outputs[i].ephemeralPublicKey,
               txHash: "",
@@ -186,6 +210,7 @@ export function PrivateBalanceView() {
           if (balance > 0n) {
             ghostFound.push({
               id: `watch-${addr}`,
+              chain: isEvmAddress(addr) ? "ethereum" : "solana",
               address: addr,
               balance,
               txHash: "",
@@ -202,20 +227,20 @@ export function PrivateBalanceView() {
     return () => {
       cancelled = true;
     };
-  }, [client, cluster, ghostEntries, watchlistAddresses, publicClient, refreshKey]);
+  }, [client, cluster, ghostEntries, watchlistAddresses, solanaClient, evmClient, refreshKey]);
 
   const portfolio = useMemo(() => {
     const activeTxs = [...found.filter((tx) => !tx.isSpent), ...ghostTxs];
-    let totalRaw = 0n;
+    const totals: Record<ChainKey, bigint> = { ethereum: 0n, solana: 0n };
     const entries: PortfolioEntry[] = [];
     for (const tx of activeTxs) {
       if (tx.balance > 0n) {
-        totalRaw += tx.balance;
+        totals[tx.chain] += tx.balance;
         entries.push({ tx, balanceRaw: tx.balance });
       }
     }
-    return { asset: nativeAsset, totalRaw, entries };
-  }, [found, ghostTxs, nativeAsset]);
+    return { totals, entries };
+  }, [found, ghostTxs]);
 
   const setDestination = useCallback((txId: string, value: string) => {
     setDestinationByTxId((prev) => ({ ...prev, [txId]: value }));
@@ -231,6 +256,7 @@ export function PrivateBalanceView() {
   const handleClaim = useCallback(
     async (tx: FoundTx, destination: string) => {
       const trimmed = destination.trim();
+      const asset = NATIVE_ASSET[tx.chain];
       if (!client) {
         setClaimError("Session not ready.");
         return;
@@ -240,8 +266,12 @@ export function PrivateBalanceView() {
         return;
       }
       if (tx.balance <= 0n) return;
-      if (!trimmed || !isAddress(trimmed)) {
-        setClaimError("Enter a valid destination address.");
+      if (!trimmed || !isAddressForChain(trimmed, tx.chain)) {
+        setClaimError(
+          tx.chain === "ethereum"
+            ? "Enter a valid Ethereum destination address."
+            : "Enter a valid Solana destination address.",
+        );
         return;
       }
 
@@ -251,29 +281,33 @@ export function PrivateBalanceView() {
         { id: "wd-1", status: "wait", label: "Reconstructing key + sweeping…" },
       ]);
       logPush("wasm", "Reconstructing stealth key and signing claim tx…");
-      logPush("blockchain", `Claim: ${formatSol(tx.balance)} SOL → ${shortenAddress(trimmed)}`);
+      logPush(
+        "blockchain",
+        `Claim: ${formatNativeAmount(tx.balance, tx.chain)} ${asset.symbol} → ${shortenAddress(trimmed)}`,
+      );
 
       try {
         const { tx: sig } = await client.sweep({
           output: { ephemeralPublicKey: tx.ephemeralPublicKey as Hex },
-          chain: "solana",
+          chain: tx.chain,
           destination: trimmed,
         });
         setWithdrawalSteps([{ id: "wd-1", status: "done", label: "Swept to destination." }]);
         pushTx({
           cluster,
+          chain: tx.chain,
           kind: tx.source === "manual" ? "ghost" : "received",
           counterparty: tx.source === "manual" ? "Manual Ghost" : shortenAddress(tx.address, 10, 0),
           amountLamports: tx.balance.toString(),
-          tokenSymbol: "SOL",
+          tokenSymbol: asset.symbol,
           tokenAddress: null,
-          amount: formatSol(tx.balance),
+          amount: formatNativeAmount(tx.balance, tx.chain),
           txHash: sig,
           stealthAddress: tx.address,
         });
-        if (cluster != null) {
-          showToast("Withdrawal successful", { explorerTx: { cluster, txSig: sig } });
-        }
+        showToast("Withdrawal successful", {
+          explorerTx: { cluster: cluster ?? undefined, txSig: sig, chain: tx.chain },
+        });
         if (tx.source === "manual") {
           setGhostTxs((prev) => prev.filter((t) => t.id !== tx.id));
         } else {
@@ -292,7 +326,7 @@ export function PrivateBalanceView() {
   );
 
   const allEntries = portfolio.entries;
-  const totalSol = portfolio.totalRaw;
+  const hasFunds = portfolio.totals.ethereum > 0n || portfolio.totals.solana > 0n;
 
   if (!isSetup) {
     return (
@@ -309,7 +343,8 @@ export function PrivateBalanceView() {
           <div>
             <h2 className="font-display text-2xl font-bold text-white">Private balance</h2>
             <p className="mt-1 text-sm text-mist">
-              SOL across your stealth addresses. Withdraw to any Solana address.
+              Funds across your stealth addresses on Ethereum and Solana. Withdraw to any address
+              on the output's chain.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -346,30 +381,40 @@ export function PrivateBalanceView() {
         <div className="rounded-2xl border border-ink-700 bg-ink-900/25 p-6">
           <p className="text-mist text-sm">Deciphering payments…</p>
         </div>
-      ) : totalSol === 0n && allEntries.length === 0 ? (
+      ) : !hasFunds && allEntries.length === 0 ? (
         <div className="rounded-2xl border border-ink-700 bg-ink-900/25 p-6">
           <p className="text-mist text-sm">No incoming payments found yet.</p>
           <p className="text-mist/70 text-xs mt-1">
-            Payments sent to your stealth address will appear here.
+            Payments sent to your stealth address on either chain will appear here.
           </p>
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="rounded-2xl border border-ink-700 bg-ink-900/30 p-6">
-            <p className="text-mist text-sm">Total SOL</p>
-            <p className="font-display text-2xl font-bold text-white mt-1">{formatSol(totalSol)}</p>
-            <p className="text-mist/70 text-xs mt-1">
-              {allEntries.length} address{allEntries.length !== 1 ? "es" : ""}
-            </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {(["ethereum", "solana"] as const).map((c) => (
+              <div key={c} className="rounded-2xl border border-ink-700 bg-ink-900/30 p-6">
+                <p className="text-mist text-sm">Total {NATIVE_ASSET[c].symbol}</p>
+                <p className="font-display text-2xl font-bold text-white mt-1">
+                  {formatNativeAmount(portfolio.totals[c], c)}
+                </p>
+                <p className="text-mist/70 text-xs mt-1">
+                  {allEntries.filter((e) => e.tx.chain === c).length} address
+                  {allEntries.filter((e) => e.tx.chain === c).length !== 1 ? "es" : ""}
+                </p>
+              </div>
+            ))}
           </div>
 
-          <h3 className="font-display text-xl font-bold text-white">SOL — Stealth addresses</h3>
+          <h3 className="font-display text-xl font-bold text-white">Stealth addresses</h3>
           <div className="space-y-3">
             {allEntries
               .filter((e) => e.balanceRaw > 0n)
               .map(({ tx, balanceRaw }) => {
-                const amountStr = formatSol(balanceRaw);
+                const asset = NATIVE_ASSET[tx.chain];
+                const amountStr = formatNativeAmount(balanceRaw, tx.chain);
                 const canWithdraw = tx.source !== "watch" && !!tx.ephemeralPublicKey;
+                const connectedDest =
+                  tx.chain === "ethereum" ? wallets.ethereum.address : wallets.solana.address;
                 return (
                   <div
                     key={tx.id}
@@ -377,6 +422,17 @@ export function PrivateBalanceView() {
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-sol-purple/15 text-sol-purple border border-sol-purple/30 uppercase">
+                          {asset.symbol}
+                        </span>
+                        {tx.announceSource === "uab" && (
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30"
+                            title="Discovered via a cross-chain Wormhole announcement"
+                          >
+                            Cross-chain
+                          </span>
+                        )}
                         {tx.source !== "announcement" && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40">
                             {tx.source === "manual" ? "Manual/Ghost Funds" : "Watch-only"}
@@ -384,13 +440,15 @@ export function PrivateBalanceView() {
                         )}
                         <ExplorerLink
                           cluster={cluster}
-                          value={tx.solanaAddress ?? tx.address}
+                          chain={tx.chain}
+                          value={tx.holderAddress ?? tx.address}
                           type="address"
                           className="text-mist text-xs"
                         />
                         {tx.txHash && (
                           <ExplorerLink
                             cluster={cluster}
+                            chain={tx.chain}
                             value={tx.txHash}
                             type="tx"
                             className="text-mist/70 text-xs"
@@ -399,7 +457,7 @@ export function PrivateBalanceView() {
                           />
                         )}
                       </div>
-                      <p className="text-success font-semibold mt-0.5">{amountStr} SOL</p>
+                      <p className="text-success font-semibold mt-0.5">{amountStr} {asset.symbol}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {tx.source !== "announcement" && cluster != null && (
@@ -429,13 +487,17 @@ export function PrivateBalanceView() {
                           type="text"
                           value={destinationByTxId[tx.id] ?? ""}
                           onChange={(e) => setDestination(tx.id, e.target.value)}
-                          placeholder="Destination Solana address…"
+                          placeholder={
+                            tx.chain === "ethereum"
+                              ? "Destination Ethereum address…"
+                              : "Destination Solana address…"
+                          }
                           className="input-field text-sm"
                         />
-                        {mainWalletAddress && (
+                        {connectedDest && (
                           <button
                             type="button"
-                            onClick={() => setDestination(tx.id, mainWalletAddress)}
+                            onClick={() => setDestination(tx.id, connectedDest)}
                             className="mt-1.5 px-2 py-1 text-xs rounded-md btn-secondary"
                           >
                             Use connected wallet
@@ -453,9 +515,12 @@ export function PrivateBalanceView() {
       {claimModalTx && (
         <ClaimModal
           tx={claimModalTx}
-          asset={nativeAsset}
           destination={destinationByTxId[claimModalTx.id] ?? ""}
-          mainWalletAddress={mainWalletAddress ?? undefined}
+          mainWalletAddress={
+            (claimModalTx.chain === "ethereum"
+              ? wallets.ethereum.address
+              : wallets.solana.address) ?? undefined
+          }
           cluster={cluster}
           claiming={claimingId === claimModalTx.id}
           error={claimError}

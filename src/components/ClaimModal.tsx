@@ -1,6 +1,5 @@
-import { formatSol } from "../lib/format";
+import { NATIVE_ASSET, formatNativeAmount } from "../lib/chainAssets";
 import type { FoundTx } from "./PrivateBalanceView";
-import type { TokenInfo } from "../lib/tokens";
 import { ProtocolStepper } from "./ProtocolStepper";
 import type { ProtocolStep } from "./ProtocolStepper";
 import { ExplorerLink } from "./ExplorerLink";
@@ -8,7 +7,6 @@ import { ModalShell } from "./ModalShell";
 
 type ClaimModalProps = {
   tx: FoundTx;
-  asset: TokenInfo;
   destination: string;
   mainWalletAddress: string | undefined;
   cluster: string | null;
@@ -22,7 +20,6 @@ type ClaimModalProps = {
 
 export function ClaimModal({
   tx,
-  asset,
   destination,
   mainWalletAddress,
   cluster,
@@ -33,8 +30,8 @@ export function ClaimModal({
   onConfirm,
   onClose,
 }: ClaimModalProps) {
-  const amountRaw = tx.balance;
-  const amountStr = formatSol(amountRaw);
+  const asset = NATIVE_ASSET[tx.chain];
+  const amountStr = formatNativeAmount(tx.balance, tx.chain);
   const destinationTrimmed = destination.trim();
   const isSameAsMain =
     !!mainWalletAddress &&
@@ -53,7 +50,7 @@ export function ClaimModal({
 
         <div className="mb-4 p-3 rounded-xl bg-ink-950/40 border border-ink-700 font-mono text-xs text-mist">
           <div className="flex justify-between items-center gap-2">
-            <ExplorerLink cluster={cluster} value={tx.address} type="address" className="text-slate-200" />
+            <ExplorerLink cluster={cluster} chain={tx.chain} value={tx.address} type="address" className="text-slate-200" />
             <span className="text-success font-medium shrink-0">{amountStr} {asset.symbol}</span>
           </div>
         </div>
@@ -73,7 +70,11 @@ export function ClaimModal({
             type="text"
             value={destination}
             onChange={(e) => onDestinationChange(e.target.value)}
-            placeholder="Solana address (use a fresh address)"
+            placeholder={
+              tx.chain === "ethereum"
+                ? "Ethereum address (use a fresh address)"
+                : "Solana address (use a fresh address)"
+            }
             className="input-field text-sm"
           />
         </div>
