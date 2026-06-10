@@ -5,22 +5,25 @@
   --font-sans: "DM Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  /* Solana theme tokens */
-  --color-ink-950: #0a0a12;
-  --color-ink-900: #0e0e1a;
-  --color-ink-800: #151525;
-  --color-ink-700: #1e1e35;
-  --color-ink-600: #2a2a4a;
-  --color-mist: #9ba3bf;
-  --color-glow: #14F195;
-  --color-glow-dim: #10c478;
-  --color-glow-muted: #0b4a2d;
+  /* Theme tokens */
+  --color-ink-950: #07080d;
+  --color-ink-900: #0c0e14;
+  --color-ink-800: #13161f;
+  --color-ink-700: #1c2030;
+  --color-ink-600: #2a3145;
+  --color-mist: #94a3b8;
+  --color-glow: #5eead4;
+  --color-glow-dim: #2dd4bf;
+  --color-glow-muted: #134e4a;
   --color-flare: #f472b6;
-  --color-sol-purple: #9945FF;
-  --color-sol-purple-dim: #7c38cc;
-  --color-sol-purple-muted: #2d1560;
-  --color-sol-gradient-start: #9945FF;
-  --color-sol-gradient-end: #14F195;
+
+  /* Aliases: inner-app components reference these; map to cyan/teal so the theme is consistent */
+  --color-sol-purple: var(--color-glow);
+  --color-sol-purple-dim: var(--color-glow-dim);
+  --color-sol-purple-muted: var(--color-glow-muted);
+  /* Dark teal for gradient backgrounds — maintains white-text contrast */
+  --color-sol-gradient-start: #0d9488;
+  --color-sol-gradient-end: #0f766e;
 
   --color-black: #000000;
   --color-white: #ffffff;
@@ -41,11 +44,11 @@
   --color-surface-overlay: var(--color-ink-800);
   --color-border: color-mix(in oklab, var(--color-ink-600) 70%, transparent);
   --color-border-subtle: color-mix(in oklab, var(--color-ink-600) 55%, transparent);
-  --color-border-focus: color-mix(in oklab, var(--color-sol-purple) 45%, var(--color-ink-600));
+  --color-border-focus: color-mix(in oklab, var(--color-glow) 35%, var(--color-ink-600));
 
   --color-accent: #ffffff;
   --color-accent-muted: #a3a3a3;
-  --color-success: #14F195;
+  --color-success: #22c55e;
   --color-warning: #eab308;
   --color-error: #ef4444;
 }
@@ -56,8 +59,8 @@
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--color-sol-purple-muted) 85%, transparent);
-    color: var(--color-sol-purple);
+    background: color-mix(in oklab, var(--color-glow-muted) 85%, transparent);
+    color: var(--color-glow);
   }
 
   button:not(:disabled),
@@ -76,23 +79,21 @@
   .bg-grid-fade {
     background-image:
       linear-gradient(to bottom, transparent 0%, var(--color-ink-950) 100%),
-      linear-gradient(90deg, rgba(153, 69, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(rgba(153, 69, 255, 0.03) 1px, transparent 1px);
+      linear-gradient(90deg, rgba(94, 234, 212, 0.03) 1px, transparent 1px),
+      linear-gradient(rgba(94, 234, 212, 0.03) 1px, transparent 1px);
   }
 
+  /* Gradient utilities used by inner-app components — teal variant */
   .bg-sol-gradient {
     background: linear-gradient(135deg, var(--color-sol-gradient-start), var(--color-sol-gradient-end));
   }
 
   .text-sol-gradient {
-    background: linear-gradient(135deg, var(--color-sol-gradient-start), var(--color-sol-gradient-end));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--color-glow);
   }
 
   .border-sol-gradient {
-    border-image: linear-gradient(135deg, var(--color-sol-gradient-start), var(--color-sol-gradient-end)) 1;
+    border-color: var(--color-glow);
   }
 }
 
@@ -130,10 +131,10 @@ body {
   );
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(153, 69, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 16px;
   padding: 24px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 60px rgba(153, 69, 255, 0.04);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 60px rgba(255, 255, 255, 0.02);
 }
 
 .banner-glass {
@@ -147,15 +148,14 @@ body {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #9945FF, #14F195);
-  color: var(--color-white);
+  background: var(--color-white);
+  color: var(--color-ink-950);
   font-weight: 600;
   border: none;
-  transition: opacity 0.15s ease, box-shadow 0.2s ease;
+  transition: opacity 0.15s ease;
 }
 .btn-primary:hover:not(:disabled) {
-  opacity: 0.9;
-  box-shadow: 0 0 20px rgba(153, 69, 255, 0.3);
+  opacity: 0.85;
 }
 .btn-primary:disabled {
   opacity: 0.4;
@@ -172,7 +172,7 @@ body {
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 .btn-secondary:hover:not(:disabled) {
-  border-color: var(--color-sol-purple);
+  border-color: var(--color-neutral-600);
   color: var(--color-white);
 }
 .btn-secondary:disabled {
@@ -197,7 +197,7 @@ body {
 }
 .input-field:focus {
   border-color: var(--color-border-focus);
-  box-shadow: 0 0 0 2px rgba(153, 69, 255, 0.1);
+  box-shadow: 0 0 0 2px rgba(94, 234, 212, 0.1);
 }
 
 .text-address {
@@ -239,12 +239,12 @@ body {
   0%, 100% {
     opacity: 0.7;
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(153, 69, 255, 0.1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.06);
   }
   50% {
     opacity: 1;
     transform: scale(1.05);
-    box-shadow: 0 0 28px 4px rgba(153, 69, 255, 0.15);
+    box-shadow: 0 0 28px 4px rgba(255, 255, 255, 0.06);
   }
 }
 .privacy-shield {
@@ -254,13 +254,4 @@ body {
   border: 2px solid var(--color-border);
   background: radial-gradient(circle at 30% 30%, var(--color-surface-raised), var(--color-surface));
   animation: privacy-shield 2.5s ease-in-out infinite;
-}
-
-@keyframes sol-glow-pulse {
-  0%, 100% {
-    box-shadow: 0 0 20px rgba(153, 69, 255, 0.15), 0 0 40px rgba(20, 241, 149, 0.05);
-  }
-  50% {
-    box-shadow: 0 0 30px rgba(153, 69, 255, 0.25), 0 0 60px rgba(20, 241, 149, 0.1);
-  }
 }

@@ -7,39 +7,39 @@ type LandingPageProps = {
 const FEATURES = [
   {
     icon: "↕",
-    accent: "green" as const,
+    accent: "glow" as const,
     title: "Stealth payments",
-    body: "Senders derive a fresh one-time receive surface from your stealth meta-address. Incoming SOL and SPL transfers map to outputs only you can spend.",
+    body: "Senders derive a fresh one-time receive surface from your stealth meta-address. Incoming transfers map to outputs only you can spend, across Ethereum and Solana.",
   },
   {
     icon: "⌘",
-    accent: "green" as const,
+    accent: "glow" as const,
     title: "On-chain registry",
-    body: "Link your Solana wallet to a meta-address on-chain so payers can resolve you without passing a long key every time.",
+    body: "Link your wallet to a meta-address on-chain so payers can resolve you without passing a long key every time. Works on both supported chains.",
   },
   {
     icon: "◉",
-    accent: "green" as const,
+    accent: "glow" as const,
     title: "Announcement stream",
-    body: "Solana program logs with view tags let your wallet discover which announcements are yours—without revealing who is scanning.",
+    body: "On-chain announcements with view tags let your wallet discover which outputs are yours without revealing who is scanning.",
   },
   {
     icon: "✦",
-    accent: "purple" as const,
+    accent: "flare" as const,
     title: "Proof-backed reputation",
     body: "Optional PSR layer: Groth16 proofs + Merkle roots + nullifiers let apps verify traits without tying them to your public wallet.",
   },
   {
     icon: "⬡",
-    accent: "green" as const,
+    accent: "glow" as const,
     title: "Browser-native crypto",
-    body: "Rust → WASM for secp256k1 scanning, Groth16 + Circom for ZK proofs—runs entirely on-device with no server round-trips.",
+    body: "Rust compiled to WASM for secp256k1 scanning, Groth16 + Circom for ZK proofs — runs entirely on-device with no server round-trips.",
   },
   {
     icon: "⛓",
-    accent: "green" as const,
-    title: "Open programs",
-    body: "Registry, announcer, and verifier programs on Solana. No proprietary backend—integrators use the same on-chain interfaces.",
+    accent: "glow" as const,
+    title: "Open contracts",
+    body: "Registry, announcer, and verifier contracts deployed on Ethereum and Solana. No proprietary backend — integrators use the same on-chain interfaces.",
   },
 ] as const;
 
@@ -47,12 +47,12 @@ const STEPS = [
   {
     n: "01",
     title: "Initialize",
-    body: "Sign a message with your Solana wallet to derive stealth keys locally. Nothing leaves your device.",
+    body: "Sign a message with your wallet to derive stealth keys locally. Nothing leaves your device.",
   },
   {
     n: "02",
     title: "Register",
-    body: "One-time transaction: register your meta-address on the Solana registry program.",
+    body: "One-time transaction: register your meta-address on the on-chain registry for your chain.",
   },
   {
     n: "03",
@@ -62,7 +62,7 @@ const STEPS = [
   {
     n: "04",
     title: "Prove (optional)",
-    body: "Generate a ZK proof scoped to an action—verify on-chain without revealing your wallet.",
+    body: "Generate a ZK proof scoped to an action — verify on-chain without revealing your wallet.",
   },
 ] as const;
 
@@ -76,46 +76,53 @@ export function LandingPage({ onEnterVault }: LandingPageProps) {
           aria-hidden
           style={{
             background:
-              "radial-gradient(ellipse 70% 50% at 50% 0%, rgba(153,69,255,0.08) 0%, rgba(20,241,149,0.03) 40%, transparent 70%)",
+              "radial-gradient(ellipse 70% 50% at 50% 0%, rgba(94,234,212,0.06) 0%, rgba(94,234,212,0.02) 40%, transparent 70%)",
           }}
         />
 
-        <span className="relative inline-flex items-center gap-2 rounded-full border border-sol-purple/30 bg-sol-purple-muted/15 px-3.5 py-1 text-xs font-medium text-sol-purple mb-6">
-          <span className="h-1.5 w-1.5 rounded-full bg-sol-purple" aria-hidden />
-          Solana · Stealth addresses
+        <span className="relative inline-flex items-center gap-2 rounded-full border border-glow/25 bg-glow-muted/10 px-3.5 py-1 text-xs font-medium text-glow mb-6">
+          <span className="h-1.5 w-1.5 rounded-full bg-glow" aria-hidden />
+          Ethereum · Solana · Cross-chain
         </span>
 
         <h1 className="relative font-display text-5xl sm:text-6xl md:text-7xl font-extrabold tracking-tight leading-[1.05]">
           Privacy protocol
           <br />
-          <span className="text-sol-gradient">on Solana</span>
-          <span className="text-glow">.</span>
+          <span className="text-mist">any chain.</span>
         </h1>
 
         <p className="relative mt-6 max-w-2xl text-lg text-mist leading-relaxed">
-          <strong className="text-white">Opaque</strong> is a Solana-native stealth layer: unlinkable receives,
-          optional <strong className="text-white">ZK-backed reputation</strong>, and
-          programs you can verify on-chain—without exposing your everyday wallet.
+          <strong className="text-white">Opaque</strong> is a cross-chain stealth layer: unlinkable receives across
+          Ethereum and Solana, optional <strong className="text-white">ZK-backed reputation</strong>, and
+          contracts you can verify on-chain — without exposing your everyday wallet.
         </p>
 
         <div className="relative mt-8 flex flex-col sm:flex-row items-center gap-4">
           <button
             type="button"
             onClick={onEnterVault}
-            className="group inline-flex items-center gap-2.5 rounded-xl bg-sol-gradient px-7 py-3.5 text-sm font-semibold text-white transition-all hover:shadow-[0_0_32px_rgba(153,69,255,0.3)] hover:scale-[1.02] active:scale-[0.98]"
+            className="group inline-flex items-center gap-2.5 rounded-xl bg-glow px-7 py-3.5 text-sm font-semibold text-ink-950 transition-all hover:opacity-90 hover:shadow-[0_0_32px_rgba(94,234,212,0.25)] hover:scale-[1.02] active:scale-[0.98]"
           >
             Open wallet
             <span className="transition-transform group-hover:translate-x-0.5" aria-hidden>
               →
             </span>
           </button>
+          <a
+            href="https://docs.opaque.cash"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-xl border border-ink-600 px-7 py-3.5 text-sm font-medium text-mist transition-all hover:border-neutral-500 hover:text-white"
+          >
+            Read the docs
+          </a>
         </div>
       </section>
 
       {/* ── Features ── */}
       <section className="mx-auto w-full max-w-6xl px-5 sm:px-8 pb-20 md:pb-28">
         <div className="mb-10 text-center">
-          <p className="text-xs font-semibold uppercase tracking-widest text-sol-purple">
+          <p className="text-xs font-semibold uppercase tracking-widest text-glow">
             Core primitives
           </p>
           <h2 className="mt-2 font-display text-3xl font-bold text-white sm:text-4xl">
@@ -127,12 +134,12 @@ export function LandingPage({ onEnterVault }: LandingPageProps) {
           {FEATURES.map((f) => (
             <div
               key={f.title}
-              className="group rounded-2xl border border-ink-600 bg-ink-900/25 p-6 transition-all hover:border-sol-purple/30 hover:shadow-[0_0_24px_rgba(153,69,255,0.06)]"
+              className="group rounded-2xl border border-ink-600 bg-ink-900/25 p-6 transition-all hover:border-glow/30 hover:shadow-[0_0_24px_rgba(94,234,212,0.06)]"
             >
               <span
                 className={`mb-4 flex h-10 w-10 items-center justify-center rounded-xl text-lg ${
-                  f.accent === "purple"
-                    ? "bg-sol-purple-muted/30 text-sol-purple"
+                  f.accent === "flare"
+                    ? "bg-flare/15 text-flare"
                     : "bg-glow-muted/30 text-glow"
                 }`}
                 aria-hidden
@@ -149,7 +156,7 @@ export function LandingPage({ onEnterVault }: LandingPageProps) {
       {/* ── How it works ── */}
       <section className="mx-auto w-full max-w-4xl px-5 sm:px-8 pb-20 md:pb-28">
         <div className="mb-10 text-center">
-          <p className="text-xs font-semibold uppercase tracking-widest text-sol-purple">
+          <p className="text-xs font-semibold uppercase tracking-widest text-glow">
             Flow
           </p>
           <h2 className="mt-2 font-display text-3xl font-bold text-white sm:text-4xl">
@@ -161,9 +168,9 @@ export function LandingPage({ onEnterVault }: LandingPageProps) {
           {STEPS.map((s) => (
             <div
               key={s.n}
-              className="rounded-2xl border border-ink-700 bg-ink-900/30 p-6 transition-all hover:border-sol-purple/20"
+              className="rounded-2xl border border-ink-700 bg-ink-900/30 p-6 transition-all hover:border-glow/20"
             >
-              <span className="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-sol-purple-muted/30 font-mono text-xs font-bold text-sol-purple">
+              <span className="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-glow-muted/30 font-mono text-xs font-bold text-glow">
                 {s.n}
               </span>
               <h3 className="font-display text-base font-bold text-white">{s.title}</h3>
@@ -180,7 +187,7 @@ export function LandingPage({ onEnterVault }: LandingPageProps) {
             Privacy &amp; trade-offs
           </h2>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-sol-purple/20 bg-ink-950/40 p-5">
+            <div className="rounded-2xl border border-ink-600 bg-ink-950/40 p-5">
               <p className="text-sm font-semibold text-glow font-display">What's private</p>
               <ul className="mt-3 space-y-2 text-sm text-mist leading-relaxed">
                 <li>Incoming transfers are harder to link to a single deposit address.</li>
@@ -188,12 +195,12 @@ export function LandingPage({ onEnterVault }: LandingPageProps) {
                 <li>Stealth keys and scanning happen entirely on-device.</li>
               </ul>
             </div>
-            <div className="rounded-2xl border border-sol-purple/20 bg-ink-950/40 p-5">
+            <div className="rounded-2xl border border-ink-600 bg-ink-950/40 p-5">
               <p className="text-sm font-semibold text-flare font-display">What's not magic</p>
               <ul className="mt-3 space-y-2 text-sm text-mist leading-relaxed">
-                <li>On-chain activity still leaks timing/amount patterns.</li>
+                <li>On-chain activity still leaks timing and amount patterns.</li>
                 <li>Local scanning means device-bound recovery constraints.</li>
-                <li>Experimental protocol — use devnet and small amounts before relying on real value.</li>
+                <li>Experimental protocol — use testnet and small amounts before relying on real value.</li>
               </ul>
             </div>
           </div>

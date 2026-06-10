@@ -127,7 +127,7 @@ function AppContent() {
         protocolLog={<ProtocolLogPanel />}
       >
         <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-          <span className="h-7 w-7 animate-spin rounded-full border-2 border-ink-600 border-t-sol-purple" aria-hidden />
+          <span className="h-7 w-7 animate-spin rounded-full border-2 border-ink-600 border-t-glow" aria-hidden />
           <p className="text-sm text-mist">Authenticating with protocol…</p>
         </div>
       </Layout>
