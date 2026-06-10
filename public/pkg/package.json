@@ -1,15 +1,29 @@
 {
-  "name": "cryptography",
+  "name": "opaque-scanner",
   "type": "module",
-  "version": "0.1.0",
+  "description": "Opaque Cash stealth-address (DKSAP) scanner: EIP-5564 view-tag scanning, V1/V2 reputation attestations, and Merkle witness helpers. Compiles to WASM.",
+  "version": "0.1.2",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/opaquecash/scanner"
+  },
   "files": [
     "cryptography_bg.wasm",
     "cryptography.js",
     "cryptography.d.ts"
   ],
   "main": "cryptography.js",
+  "homepage": "https://opaque.cash",
   "types": "cryptography.d.ts",
   "sideEffects": [
     "./snippets/*"
+  ],
+  "keywords": [
+    "stealth-address",
+    "eip5564",
+    "privacy",
+    "zk",
+    "wasm"
   ]
 }

@@ -6,8 +6,6 @@ export const check_announcement_wasm: (a: number, b: number, c: number, d: numbe
 export const derive_stealth_address_wasm: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const encode_attestation_metadata_wasm: (a: number, b: bigint) => [number, number];
 export const encode_v2_attestation_metadata_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
-export const generate_reputation_witness: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
-export const generate_reputation_witness_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
 export const reconstruct_signing_key_wasm: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const scan_attestations_v2_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: bigint, j: number, k: number) => [number, number, number, number];
 export const scan_attestations_wasm: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];

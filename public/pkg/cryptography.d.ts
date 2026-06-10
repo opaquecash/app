@@ -74,42 +74,6 @@ export function encode_attestation_metadata_wasm(view_tag: number, attestation_i
  */
 export function encode_v2_attestation_metadata_wasm(view_tag: number, schema_id_hex: string, issuer_hex: string, attestation_uid_hex: string, nonce_hex: string): string;
 
-/**
- * Generates the full ZK-circuit witness for a specific trait.
- *
- * Builds a local Merkle tree from the given attestations, finds the first
- * attestation matching `target_trait_id`, generates an inclusion proof,
- * and returns a JSON witness compatible with the Circom circuit.
- *
- * # Arguments
- * * `attestations_json` - JSON array of `StealthAttestation` (from `scan_attestations_wasm`)
- * * `target_trait_id` - The attestation_id to prove (as string decimal)
- * * `stealth_privkey_bytes` - 32-byte stealth private key for the matching address
- * * `external_nullifier` - Action-scoped nonce (as string decimal)
- *
- * # Returns
- * JSON `CircuitWitness` for the Circom prover.
- */
-export function generate_reputation_witness(attestations_json: string, target_trait_id: string, stealth_privkey_bytes: Uint8Array, external_nullifier: string): string;
-
-/**
- * Generates a V2 ZK-circuit witness for a specific schema-bound trait.
- *
- * The V2 witness uses the new 5-input leaf:
- *   Poseidon(stealth_pk, schema_id, issuer_pk_x, trait_data_hash, nonce)
- *
- * # Arguments
- * * `attestations_v2_json` - JSON array of V2StealthAttestation (from scan_attestations_v2_wasm)
- * * `target_schema_id_hex` - The schema_id to prove (64-char hex)
- * * `stealth_privkey_bytes` - 32-byte stealth private key (Uint8Array)
- * * `trait_data_hash_hex` - Poseidon hash of the decoded data fields (64-char hex string)
- * * `external_nullifier` - Action-scoped nonce as decimal string
- *
- * # Returns
- * JSON object with all circuit inputs (private + public) for snarkjs.fullProve.
- */
-export function generate_reputation_witness_v2(attestations_v2_json: string, target_schema_id_hex: string, stealth_privkey_bytes: Uint8Array, trait_data_hash_hex: string, external_nullifier: string): string;
-
 export function init(): void;
 
 /**
@@ -167,8 +131,6 @@ export interface InitOutput {
     readonly derive_stealth_address_wasm: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly encode_attestation_metadata_wasm: (a: number, b: bigint) => [number, number];
     readonly encode_v2_attestation_metadata_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
-    readonly generate_reputation_witness: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
-    readonly generate_reputation_witness_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly reconstruct_signing_key_wasm: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly scan_attestations_v2_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: bigint, j: number, k: number) => [number, number, number, number];
     readonly scan_attestations_wasm: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
