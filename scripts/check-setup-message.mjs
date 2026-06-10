@@ -18,8 +18,8 @@ import { dirname, join, relative } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = join(here, "..", "src");
-// SDK source of truth (solana/frontend/scripts -> opaque-protocol root -> sdk/...).
-const SDK_DKSAP = join(here, "..", "..", "..", "sdk", "packages", "opaque", "src", "crypto", "dksap.ts");
+// SDK source of truth (app/scripts -> opaque-protocol root -> sdk/...).
+const SDK_DKSAP = join(here, "..", "..", "sdk", "packages", "opaque", "src", "crypto", "dksap.ts");
 
 const CANONICAL =
   "Sign this message to derive your Opaque Cash stealth keys. This does not approve any transaction.";
