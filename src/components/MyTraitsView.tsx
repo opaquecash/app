@@ -1,8 +1,11 @@
 /**
- * My Traits — reputation attestations discovered for the user's stealth addresses.
+ * My Traits — reputation attestations discovered for the user's stealth addresses, on both
+ * chains.
  *
- * Discovery and key reconstruction run through OpaqueClient (client.discoverTraits over the cached
- * announcement rows); useScanner stays only as the IndexedDB fetch/cache layer. Each trait can be
+ * Discovery and key reconstruction run through OpaqueClient: Solana rows come from the
+ * useScanner IndexedDB cache, Ethereum rows from `client.fetchAnnouncementRows("ethereum")`
+ * (native announcements only — the Wormhole UAB payload is too small to relay attestation
+ * metadata, so traits never arrive cross-chain). Each trait is tagged with its chain and can be
  * proven with a browser-side ZK proof via ProofGeneratorModal.
  */
 
@@ -31,7 +34,10 @@ function cachedToRow(c: CachedAnnouncement): IndexerAnnouncement {
   };
 }
 
-function TraitCard({ trait, onProve }: { trait: DiscoveredTrait; onProve: (t: DiscoveredTrait) => void }) {
+/** A discovered trait tagged with the chain whose native announcer it was found on. */
+export type ChainTaggedTrait = DiscoveredTrait & { chain: "ethereum" | "solana" };
+
+function TraitCard({ trait, onProve }: { trait: ChainTaggedTrait; onProve: (t: ChainTaggedTrait) => void }) {
   return (
     <div className="rounded-xl border border-ink-700 bg-ink-900 px-5 py-4 space-y-3 hover:border-ink-600 transition-colors">
       <div className="flex items-start justify-between gap-3">
@@ -39,10 +45,15 @@ function TraitCard({ trait, onProve }: { trait: DiscoveredTrait; onProve: (t: Di
           <p className="font-semibold text-white text-sm truncate">Trait #{trait.attestationId}</p>
           <p className="text-xs text-mist mt-0.5 font-mono truncate">{shortenAddress(trait.stealthAddress, 10, 6)}</p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-400">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-          Discovered
-        </span>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+            Discovered
+          </span>
+          <span className="inline-flex items-center rounded-full border border-sol-purple/30 bg-sol-purple/10 px-2.5 py-0.5 text-[11px] font-medium text-sol-purple uppercase">
+            {trait.chain === "ethereum" ? "ETH" : "SOL"}
+          </span>
+        </div>
       </div>
       <button
         type="button"
@@ -72,14 +83,15 @@ export function MyTraitsView({ onNavigate }: MyTraitsViewProps = {}) {
   });
   const { refresh: refreshScanner, announcements } = scanner;
 
-  const [traits, setTraits] = useState<DiscoveredTrait[]>([]);
+  const [traits, setTraits] = useState<ChainTaggedTrait[]>([]);
   const [discovering, setDiscovering] = useState(false);
-  const [activeProofTrait, setActiveProofTrait] = useState<DiscoveredTrait | null>(null);
+  const [evmRefreshKey, setEvmRefreshKey] = useState(0);
+  const [activeProofTrait, setActiveProofTrait] = useState<ChainTaggedTrait | null>(null);
 
   const rows = useMemo(() => announcements.map(cachedToRow), [announcements]);
 
   useEffect(() => {
-    if (!client || !isSetup || rows.length === 0) {
+    if (!client || !isSetup) {
       setTraits([]);
       return;
     }
@@ -87,8 +99,30 @@ export function MyTraitsView({ onNavigate }: MyTraitsViewProps = {}) {
     setDiscovering(true);
     (async () => {
       try {
-        const discovered = await client.discoverTraits(rows);
-        if (!cancelled) setTraits(discovered);
+        // Per-chain discovery so each trait carries the chain its attestation lives on
+        // (the verifier, merkle root, and proof submission are all per chain).
+        const tagged: ChainTaggedTrait[] = [];
+        if (rows.length > 0) {
+          const solanaTraits = await client.discoverTraits(rows);
+          tagged.push(...solanaTraits.map((t) => ({ ...t, chain: "solana" as const })));
+        }
+        try {
+          const evmRows = await client.fetchAnnouncementRows("ethereum");
+          if (evmRows.length > 0) {
+            const evmTraits = await client.discoverTraits(evmRows);
+            tagged.push(...evmTraits.map((t) => ({ ...t, chain: "ethereum" as const })));
+          }
+        } catch (err) {
+          console.warn("[MyTraitsView] Ethereum trait discovery failed:", err);
+        }
+        const seen = new Set<string>();
+        const deduped = tagged.filter((t) => {
+          const key = `${t.chain}-${t.attestationId}-${t.txHash}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        if (!cancelled) setTraits(deduped);
       } catch (err) {
         if (!cancelled) console.error("[MyTraitsView] discoverTraits failed:", err);
       } finally {
@@ -98,9 +132,14 @@ export function MyTraitsView({ onNavigate }: MyTraitsViewProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [client, isSetup, rows]);
+  }, [client, isSetup, rows, evmRefreshKey]);
 
   const scanning = discovering || scanner.progress.phase === "syncing" || scanner.progress.phase === "backfilling";
+
+  const handleRescan = () => {
+    setEvmRefreshKey((k) => k + 1);
+    void refreshScanner();
+  };
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
@@ -113,7 +152,7 @@ export function MyTraitsView({ onNavigate }: MyTraitsViewProps = {}) {
           {onNavigate && (
             <button type="button" onClick={() => onNavigate("attest")} className="rounded-xl bg-sol-purple px-4 py-2 text-xs font-semibold text-white hover:bg-sol-purple/90 transition-colors">Issue Attestation</button>
           )}
-          <button type="button" onClick={() => void refreshScanner()} disabled={scanning} className="rounded-xl border border-ink-700 bg-ink-900 px-4 py-2 text-xs font-medium text-white hover:bg-ink-800 disabled:opacity-50 transition-colors">
+          <button type="button" onClick={handleRescan} disabled={scanning} className="rounded-xl border border-ink-700 bg-ink-900 px-4 py-2 text-xs font-medium text-white hover:bg-ink-800 disabled:opacity-50 transition-colors">
             {scanning ? <span className="flex items-center gap-1.5"><span className="h-3 w-3 animate-spin rounded-full border border-ink-600 border-t-white" />Scanning…</span> : "Rescan"}
           </button>
         </div>
@@ -122,7 +161,7 @@ export function MyTraitsView({ onNavigate }: MyTraitsViewProps = {}) {
       {traits.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {traits.map((trait) => (
-            <TraitCard key={`${trait.attestationId}-${trait.txHash}`} trait={trait} onProve={setActiveProofTrait} />
+            <TraitCard key={`${trait.chain}-${trait.attestationId}-${trait.txHash}`} trait={trait} onProve={setActiveProofTrait} />
           ))}
         </div>
       ) : (

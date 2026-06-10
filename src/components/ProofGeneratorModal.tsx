@@ -17,13 +17,14 @@ import { ChainToggle } from "./ChainToggle";
 type ProofStep = "setup" | "generating" | "done" | "submitting" | "verified" | "error";
 
 interface ProofGeneratorModalProps {
-  trait: DiscoveredTrait;
+  /** Trait to prove; `chain` (when known) preselects where the proof is submitted. */
+  trait: DiscoveredTrait & { chain?: "ethereum" | "solana" };
   onClose: () => void;
 }
 
 export function ProofGeneratorModal({ trait, onClose }: ProofGeneratorModalProps) {
   const { client, isSetup } = useOpaqueSession();
-  const { chain, setChain, ethConnected, solConnected } = usePsrChain();
+  const { chain, setChain, ethConnected, solConnected } = usePsrChain(trait.chain);
   const [step, setStep] = useState<ProofStep>("setup");
   const [externalNullifier, setExternalNullifier] = useState("");
   const [proof, setProof] = useState<ProofData | null>(null);

@@ -1,14 +1,15 @@
 /**
- * Chain selection for PSR actions (schemas, attestations, proof submission). Defaults to the
- * session's derivation-source chain when its wallet can sign, else the first chain with a
- * connected wallet, and snaps back to a usable chain when wallets disconnect.
+ * Chain selection for PSR actions (schemas, attestations, proof submission). Defaults to
+ * `preferred` (e.g. the chain a trait was discovered on) when that wallet can sign, else the
+ * session's derivation-source chain, else the first chain with a connected wallet, and snaps
+ * back to a usable chain when wallets disconnect.
  */
 
 import { useMemo, useState } from "react";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import type { ToggleChain } from "../components/ChainToggle";
 
-export function usePsrChain() {
+export function usePsrChain(preferred?: ToggleChain) {
   const { canActOn, derivationSource } = useOpaqueSession();
 
   const usableChains = useMemo(
@@ -17,8 +18,8 @@ export function usePsrChain() {
   );
 
   // The user's explicit pick wins while its wallet is connected; otherwise fall back to the
-  // derivation-source chain, then the first chain with a connected wallet.
-  const [chosen, setChosen] = useState<ToggleChain | null>(null);
+  // preferred chain, then the derivation-source chain, then the first connected chain.
+  const [chosen, setChosen] = useState<ToggleChain | null>(preferred ?? null);
   const fallback =
     derivationSource && canActOn(derivationSource)
       ? derivationSource
