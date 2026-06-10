@@ -26,7 +26,7 @@ const ACTION_CARDS: {
     id: "send",
     icon: "↑",
     title: "Send",
-    subtitle: "Send SOL to any Solana address",
+    subtitle: "Private send on Ethereum or Solana",
     accent: "glow",
   },
   {
@@ -171,6 +171,9 @@ export function DashboardView({ onNavigate, address, cluster }: DashboardViewPro
                   <span>{formatDate(tx.timestamp)}</span>
                   <span className="rounded-md border border-ink-700 bg-ink-900/40 px-1.5 py-0.5 uppercase text-[10px]">
                     {tx.kind}
+                  </span>
+                  <span className="rounded-md border border-ink-700 bg-ink-900/40 px-1.5 py-0.5 uppercase text-[10px]">
+                    {(tx.chain ?? "solana") === "ethereum" ? "ETH" : "SOL"}
                   </span>
                   <span className="ml-auto font-mono text-mist">{tx.counterparty}</span>
                 </div>
