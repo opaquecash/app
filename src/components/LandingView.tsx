@@ -73,7 +73,7 @@ export function LandingView() {
   const wallets = useConnectedWallets();
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [source, setSource] = useState<DerivationSource | null>(null);
+  const [chosenSource, setChosenSource] = useState<DerivationSource | null>(null);
   const [rememberSession, setRememberSession] = useState<boolean>(() =>
     getRememberSignaturePreference(),
   );
@@ -84,14 +84,16 @@ export function LandingView() {
 
   // Auto-pick the derivation wallet when exactly one is connected; with both connected the
   // choice is the user's (different wallets sign SETUP_MESSAGE differently → different keys).
-  useEffect(() => {
-    const sol = wallets.solana.connected;
-    const eth = wallets.ethereum.connected;
-    if (sol && !eth) setSource("solana");
-    else if (eth && !sol) setSource("ethereum");
-    else if (!sol && !eth) setSource(null);
-    else setSource((prev) => prev);
-  }, [wallets.solana.connected, wallets.ethereum.connected]);
+  const solConnected = wallets.solana.connected;
+  const ethConnected = wallets.ethereum.connected;
+  const source: DerivationSource | null =
+    chosenSource && ((chosenSource === "solana" && solConnected) || (chosenSource === "ethereum" && ethConnected))
+      ? chosenSource
+      : solConnected && !ethConnected
+        ? "solana"
+        : ethConnected && !solConnected
+          ? "ethereum"
+          : null;
 
   const handleConnectSolana = async () => {
     setError(null);
@@ -208,7 +210,7 @@ export function LandingView() {
                     type="radio"
                     name="derivation-source"
                     checked={source === c}
-                    onChange={() => setSource(c)}
+                    onChange={() => setChosenSource(c)}
                     className="h-3.5 w-3.5 accent-sol-purple"
                   />
                   {c === "ethereum" ? "Ethereum wallet" : "Solana wallet"}

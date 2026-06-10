@@ -4,7 +4,7 @@
  * connected wallet, and snaps back to a usable chain when wallets disconnect.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import type { ToggleChain } from "../components/ChainToggle";
 
@@ -16,17 +16,18 @@ export function usePsrChain() {
     [canActOn],
   );
 
-  const [chain, setChain] = useState<ToggleChain>(() =>
-    derivationSource && canActOn(derivationSource) ? derivationSource : usableChains[0] ?? "solana",
-  );
-
-  useEffect(() => {
-    if (!usableChains.includes(chain) && usableChains.length > 0) setChain(usableChains[0]);
-  }, [usableChains, chain]);
+  // The user's explicit pick wins while its wallet is connected; otherwise fall back to the
+  // derivation-source chain, then the first chain with a connected wallet.
+  const [chosen, setChosen] = useState<ToggleChain | null>(null);
+  const fallback =
+    derivationSource && canActOn(derivationSource)
+      ? derivationSource
+      : usableChains[0] ?? "solana";
+  const chain = chosen && usableChains.includes(chosen) ? chosen : fallback;
 
   return {
     chain,
-    setChain,
+    setChain: setChosen as (chain: ToggleChain) => void,
     ethConnected: canActOn("ethereum"),
     solConnected: canActOn("solana"),
   };
