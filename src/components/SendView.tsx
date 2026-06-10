@@ -1,36 +1,58 @@
 import { useState, useEffect, useMemo } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { useWallet as useSolanaWallet } from "@solana/wallet-adapter-react";
-import { formatSol, shortenAddress } from "../lib/format";
+import { createPublicClient, http, type Address } from "viem";
+import { shortenAddress } from "../lib/format";
 import { getRpcUrl, getCluster } from "../lib/chain";
 import { getExplorerTxUrl } from "../lib/explorer";
+import { NATIVE_ASSET, formatNativeAmount, parseNativeAmount, type ChainKey } from "../lib/chainAssets";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
+import { useConnectedWallets } from "../hooks/useConnectedWallets";
+import { SEPOLIA_RPC_URL } from "../opaque/config";
 import { getConfigForCluster } from "../contracts/contract-config";
+import { ChainToggle } from "./ChainToggle";
 import { ProtocolStepper } from "./ProtocolStepper";
 import type { ProtocolStep } from "./ProtocolStepper";
 import { useProtocolLog } from "../context/ProtocolLogContext";
 import { useTxHistoryStore } from "../store/txHistoryStore";
 
-const parseLamports = (val: string) => BigInt(Math.round(parseFloat(val) * 1e9));
-const SOL_FEE_BUFFER = 10_000n;
 const isMetaAddress = (value: string): boolean => {
   const normalized = value.startsWith("0x") ? value : `0x${value}`;
   return normalized.length === 2 + 66 * 2 && (normalized.startsWith("0x02") || normalized.startsWith("0x03"));
 };
 
+const OTHER_CHAIN_LABEL: Record<ChainKey, string> = {
+  ethereum: "Solana",
+  solana: "Ethereum",
+};
+
 export function SendView() {
-  const { client, isSetup, ethereumAddress } = useOpaqueSession();
-  const { publicKey } = useSolanaWallet();
+  const { client, isSetup, canActOn, derivationSource } = useOpaqueSession();
+  const wallets = useConnectedWallets();
   const { push: logPush } = useProtocolLog();
   const pushTx = useTxHistoryStore((s) => s.push);
   const cluster = getCluster();
   const currentConfig = getConfigForCluster(cluster);
-  const address = publicKey?.toBase58() ?? null;
+
+  // Default to the derivation-source chain when its wallet can sign, else the first usable chain.
+  const usableChains = useMemo(
+    () => (["ethereum", "solana"] as const).filter((c) => canActOn(c)),
+    [canActOn],
+  );
+  const [chain, setChain] = useState<ChainKey>(() =>
+    derivationSource && canActOn(derivationSource) ? derivationSource : usableChains[0] ?? "solana",
+  );
+  useEffect(() => {
+    if (!usableChains.includes(chain) && usableChains.length > 0) setChain(usableChains[0]);
+  }, [usableChains, chain]);
+
+  const asset = NATIVE_ASSET[chain];
+  const senderAddress = chain === "solana" ? wallets.solana.address : wallets.ethereum.address;
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [relayCrossChain, setRelayCrossChain] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [txChain, setTxChain] = useState<ChainKey>("solana");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [steps, setSteps] = useState<ProtocolStep[]>([]);
@@ -38,18 +60,23 @@ export function SendView() {
   const [balanceLoading, setBalanceLoading] = useState(false);
 
   useEffect(() => {
-    if (!address) {
+    if (!senderAddress) {
       setActiveBalance(null);
       return;
     }
-    const connection = new Connection(getRpcUrl(), "confirmed");
     let cancelled = false;
     setBalanceLoading(true);
     (async () => {
       try {
-        const owner = new PublicKey(address);
-        const lamports = await connection.getBalance(owner);
-        if (!cancelled) setActiveBalance(BigInt(lamports));
+        let raw: bigint;
+        if (chain === "solana") {
+          const connection = new Connection(getRpcUrl(), "confirmed");
+          raw = BigInt(await connection.getBalance(new PublicKey(senderAddress)));
+        } else {
+          const publicClient = createPublicClient({ transport: http(SEPOLIA_RPC_URL) });
+          raw = await publicClient.getBalance({ address: senderAddress as Address });
+        }
+        if (!cancelled) setActiveBalance(raw);
       } catch {
         if (!cancelled) setActiveBalance(null);
       } finally {
@@ -59,32 +86,32 @@ export function SendView() {
     return () => {
       cancelled = true;
     };
-  }, [address]);
+  }, [senderAddress, chain]);
 
   const maxSendableBalance = useMemo(() => {
     if (activeBalance == null) return null;
-    return activeBalance > SOL_FEE_BUFFER ? activeBalance - SOL_FEE_BUFFER : 0n;
-  }, [activeBalance]);
+    return activeBalance > asset.feeBuffer ? activeBalance - asset.feeBuffer : 0n;
+  }, [activeBalance, asset.feeBuffer]);
 
-  const inputLamports = useMemo(() => {
+  const inputAmount = useMemo(() => {
     const raw = amount.trim();
     if (!raw) return null;
     try {
-      return parseLamports(raw);
+      return parseNativeAmount(raw, chain);
     } catch {
       return null;
     }
-  }, [amount]);
+  }, [amount, chain]);
 
   const isInsufficientBalance = Boolean(
     maxSendableBalance != null &&
-      inputLamports != null &&
-      inputLamports > 0n &&
-      inputLamports > maxSendableBalance
+      inputAmount != null &&
+      inputAmount > 0n &&
+      inputAmount > maxSendableBalance
   );
 
   const formattedMaxBalance =
-    maxSendableBalance != null ? formatSol(maxSendableBalance) : null;
+    maxSendableBalance != null ? formatNativeAmount(maxSendableBalance, chain) : null;
 
   const handleMaxAmount = () => {
     if (maxSendableBalance == null || maxSendableBalance === 0n) return;
@@ -94,8 +121,16 @@ export function SendView() {
   const handleSend = async () => {
     setError(null);
     setTxHash(null);
-    if (!client || !currentConfig || !publicKey) {
-      setError("Connect your wallet on a supported cluster.");
+    if (!client || !canActOn(chain)) {
+      setError(
+        chain === "ethereum"
+          ? "Connect an Ethereum wallet to send on Ethereum."
+          : "Connect a Solana wallet to send on Solana.",
+      );
+      return;
+    }
+    if (chain === "solana" && !currentConfig) {
+      setError("Connect to a supported Solana cluster.");
       return;
     }
     const recipientMeta = recipient.trim();
@@ -110,7 +145,7 @@ export function SendView() {
 
     let value: bigint;
     try {
-      value = parseLamports(amount);
+      value = parseNativeAmount(amount, chain);
     } catch {
       setError("Invalid amount.");
       return;
@@ -136,12 +171,12 @@ export function SendView() {
           ? "Sending transfer + cross-chain announcement…"
           : "Deriving stealth destination + sending…",
       );
-      logPush("blockchain", "Preparing stealth SOL transfer + announce");
+      logPush("blockchain", `Preparing stealth ${asset.symbol} transfer + announce`);
 
-      // One call: derive one-time stealth destination, transfer SOL, and announce
-      // (announce_with_relay when relaying cross-chain over Wormhole).
+      // One call: derive one-time stealth destination, transfer the native asset, and announce
+      // (announce_with_relay / UAB relay when relaying cross-chain over Wormhole).
       const result = await client.sendStealthPayment({
-        chain: "solana",
+        chain,
         recipient: recipientMeta,
         amount: value,
         announce: true,
@@ -149,21 +184,23 @@ export function SendView() {
       });
 
       setTxHash(result.txHash);
+      setTxChain(chain);
       const destination = result.destination ?? result.stealthAddress;
       addStep("done", "Transfer confirmed.", result.txHash);
       if (relayCrossChain) {
-        addStep("done", "Announcement relayed to Ethereum via Wormhole.");
+        addStep("done", `Announcement relayed to ${OTHER_CHAIN_LABEL[chain]} via Wormhole.`);
       }
       logPush("blockchain", `Tx: ${result.txHash.slice(0, 18)}…`);
 
       pushTx({
         cluster,
+        chain,
         kind: "sent",
         counterparty: shortenAddress(destination),
         amountLamports: value.toString(),
-        tokenSymbol: "SOL",
+        tokenSymbol: asset.symbol,
         tokenAddress: null,
-        amount: formatSol(value),
+        amount: formatNativeAmount(value, chain),
         txHash: result.txHash,
       });
     } catch (e) {
@@ -188,11 +225,35 @@ export function SendView() {
     );
   }
 
+  if (usableChains.length === 0) {
+    return (
+      <div className="card max-w-lg mx-auto text-center text-neutral-500">
+        Connect an Ethereum or Solana wallet to send.
+      </div>
+    );
+  }
+
+  const sendDisabled =
+    sending ||
+    (chain === "solana" && !currentConfig) ||
+    isInsufficientBalance ||
+    !recipient.trim() ||
+    !amount.trim();
+
   return (
     <div className="card max-w-lg mx-auto">
-      <h2 className="text-lg font-semibold text-white mb-1">Send SOL</h2>
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h2 className="text-lg font-semibold text-white">Send {asset.symbol}</h2>
+        <ChainToggle
+          value={chain}
+          onChange={setChain}
+          ethConnected={canActOn("ethereum")}
+          solConnected={canActOn("solana")}
+        />
+      </div>
       <p className="text-sm text-neutral-500 mb-6">
-        Send SOL to a stealth meta-address. The app derives a one-time stealth Solana destination and publishes an on-chain announcement.
+        Send {asset.symbol} to a stealth meta-address. The app derives a one-time stealth
+        destination on {asset.label} and publishes an on-chain announcement.
       </p>
 
       <div className="space-y-4">
@@ -207,7 +268,7 @@ export function SendView() {
           />
         </div>
         <div>
-          <label className="block text-sm text-neutral-500 mb-1.5">Amount (SOL)</label>
+          <label className="block text-sm text-neutral-500 mb-1.5">Amount ({asset.symbol})</label>
           <div className="relative flex rounded-lg shadow-sm">
             <input
               type="text"
@@ -228,7 +289,7 @@ export function SendView() {
           {balanceLoading && <p className="mt-1.5 text-neutral-600 text-xs">Loading balance…</p>}
           {isInsufficientBalance && formattedMaxBalance != null && (
             <p className="mt-1.5 text-red-400 text-xs">
-              Exceeds available balance ({formattedMaxBalance} SOL)
+              Exceeds available balance ({formattedMaxBalance} {asset.symbol})
             </p>
           )}
         </div>
@@ -240,16 +301,17 @@ export function SendView() {
             className="mt-0.5 h-3.5 w-3.5 rounded border-ink-600 bg-ink-900 accent-sol-purple"
           />
           <span className="text-xs text-mist">
-            Also relay the announcement to Ethereum (Wormhole). The recipient sees it on either chain.
-            {ethereumAddress == null && (
-              <span className="block text-mist/60 mt-0.5">No Ethereum wallet needed to relay from Solana.</span>
-            )}
+            Also relay the announcement to {OTHER_CHAIN_LABEL[chain]} (Wormhole). The recipient sees
+            it on either chain.
+            <span className="block text-mist/60 mt-0.5">
+              No {OTHER_CHAIN_LABEL[chain]} wallet needed to relay from {asset.label}.
+            </span>
           </span>
         </label>
         {error && <p className="text-error text-sm">{error}</p>}
         {txHash &&
           (() => {
-            const explorerUrl = getExplorerTxUrl(txHash);
+            const explorerUrl = getExplorerTxUrl(txHash, txChain);
             return (
               <div className="p-3 rounded-lg bg-neutral-900 border border-border text-sm space-y-2">
                 <div>
@@ -288,7 +350,7 @@ export function SendView() {
         <button
           type="button"
           onClick={() => void handleSend()}
-          disabled={sending || !currentConfig || isInsufficientBalance || !recipient.trim() || !amount.trim()}
+          disabled={sendDisabled}
           className={`w-full py-2.5 px-4 rounded-lg text-sm font-medium btn-primary ${sending ? "loading" : ""}`}
         >
           {sending ? "Sending…" : "Send"}

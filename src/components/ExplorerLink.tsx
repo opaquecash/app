@@ -23,6 +23,8 @@ type ExplorerLinkProps = {
   cluster?: string | null;
   value: string;
   type?: "address" | "tx";
+  /** Which chain's explorer to open. Defaults to Solana. */
+  chain?: "ethereum" | "solana";
   className?: string;
   startChars?: number;
   endChars?: number;
@@ -33,6 +35,7 @@ export function ExplorerLink({
   cluster: _cluster,
   value,
   type = "address",
+  chain = "solana",
   className = "",
   startChars = 10,
   endChars = 8,
@@ -42,8 +45,8 @@ export function ExplorerLink({
   const [copied, setCopied] = useState(false);
   const url =
     type === "tx"
-      ? getExplorerTxUrl(value)
-      : getExplorerAddressUrl(value);
+      ? getExplorerTxUrl(value, chain)
+      : getExplorerAddressUrl(value, chain);
 
   const display = truncate(value, startChars, endChars);
 

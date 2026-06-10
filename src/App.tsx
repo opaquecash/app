@@ -156,7 +156,7 @@ function ToastLayer() {
   return (
     <div className="fixed bottom-24 md:bottom-16 left-4 right-4 md:left-auto md:right-6 z-50 flex flex-col gap-2 max-w-sm md:ml-auto">
       {toasts.map((t) => {
-        const explorerUrl = t.explorerTx ? getExplorerTxUrl(t.explorerTx.txSig) : null;
+        const explorerUrl = t.explorerTx ? getExplorerTxUrl(t.explorerTx.txSig, t.explorerTx.chain ?? "solana") : null;
         return (
           <div
             key={t.id}

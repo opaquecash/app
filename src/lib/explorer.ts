@@ -1,20 +1,16 @@
 /**
- * Solana Explorer URLs by cluster.
+ * Explorer URLs per chain: Solana Explorer (by cluster) and Etherscan (Sepolia).
+ * Chain defaults to Solana for legacy call sites that predate the cross-chain UI.
  */
 
 import { getCluster, type SolanaCluster } from "./chain";
 
-function getExplorerBase(cluster: SolanaCluster): string {
-  switch (cluster) {
-    case "mainnet-beta":
-      return "https://explorer.solana.com";
-    case "devnet":
-      return "https://explorer.solana.com";
-    case "testnet":
-      return "https://explorer.solana.com";
-    case "localnet":
-      return "https://explorer.solana.com";
-  }
+export type ExplorerChain = "ethereum" | "solana";
+
+const SEPOLIA_ETHERSCAN_BASE = "https://sepolia.etherscan.io";
+
+function getSolanaExplorerBase(): string {
+  return "https://explorer.solana.com";
 }
 
 function clusterParam(cluster: SolanaCluster): string {
@@ -23,16 +19,22 @@ function clusterParam(cluster: SolanaCluster): string {
   return `?cluster=${cluster}`;
 }
 
-export function getExplorerTxUrl(txSignature: string | null): string | null {
+export function getExplorerTxUrl(
+  txSignature: string | null,
+  chain: ExplorerChain = "solana",
+): string | null {
   if (!txSignature) return null;
+  if (chain === "ethereum") return `${SEPOLIA_ETHERSCAN_BASE}/tx/${txSignature}`;
   const cluster = getCluster();
-  const base = getExplorerBase(cluster);
-  return `${base}/tx/${txSignature}${clusterParam(cluster)}`;
+  return `${getSolanaExplorerBase()}/tx/${txSignature}${clusterParam(cluster)}`;
 }
 
-export function getExplorerAddressUrl(address: string | null): string | null {
+export function getExplorerAddressUrl(
+  address: string | null,
+  chain: ExplorerChain = "solana",
+): string | null {
   if (!address) return null;
+  if (chain === "ethereum") return `${SEPOLIA_ETHERSCAN_BASE}/address/${address}`;
   const cluster = getCluster();
-  const base = getExplorerBase(cluster);
-  return `${base}/address/${address}${clusterParam(cluster)}`;
+  return `${getSolanaExplorerBase()}/address/${address}${clusterParam(cluster)}`;
 }

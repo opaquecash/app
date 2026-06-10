@@ -15,9 +15,13 @@ const hasRehydratedRef = { current: false };
 
 export type TxHistoryKind = "sent" | "received" | "ghost" | "trait";
 
+export type TxHistoryChain = "ethereum" | "solana";
+
 export type TxHistoryEntry = {
   id: string;
   cluster: string;
+  /** Chain the transaction landed on. Entries from before the cross-chain UI default to Solana. */
+  chain?: TxHistoryChain;
   kind: TxHistoryKind;
   counterparty: string;
   amountLamports: string;
@@ -70,6 +74,7 @@ export const useTxHistoryStore = create<TxHistoryState>()(
           }
           const newEntry: TxHistoryEntry = {
             ...entry,
+            chain: entry.chain ?? "solana",
             tokenSymbol: entry.tokenSymbol ?? "SOL",
             tokenAddress: entry.tokenAddress ?? null,
             amount: entry.amount ?? "",

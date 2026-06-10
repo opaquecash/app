@@ -1,21 +1,23 @@
 /**
  * Universal payment page: /pay/:identifier
- * Resolves a stealth meta-address (hex) or .sol placeholder name, then shows amount UI.
+ * Resolves a stealth meta-address (hex) or .sol placeholder name, then shows amount UI. The payer
+ * needs no Opaque identity — just a connected wallet on either chain (Solana or Ethereum).
  */
 
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { useWallet } from "@solana/wallet-adapter-react";
-import type { Hex } from "viem";
-import { formatSol } from "../lib/format";
+import { createPublicClient, http, type Address, type Hex } from "viem";
 import { getCluster, getRpcUrl } from "../lib/chain";
 import { isEnsName } from "../lib/ens";
 import { getConfigForCluster } from "../contracts/contract-config";
 import { createSendOnlyClient } from "../opaque/sendOnly";
 import { getExplorerTxUrl } from "../lib/explorer";
-
-const parseLamports = (val: string) => BigInt(Math.round(parseFloat(val) * 1e9));
+import { NATIVE_ASSET, formatNativeAmount, parseNativeAmount, type ChainKey } from "../lib/chainAssets";
+import { useConnectedWallets } from "../hooks/useConnectedWallets";
+import { useWallet as useSolanaAdapterWallet } from "@solana/wallet-adapter-react";
+import { SEPOLIA_RPC_URL } from "../opaque/config";
+import { ChainToggle } from "./ChainToggle";
 
 function isDirectMetaAddress(s: string): boolean {
   const t = s.trim().startsWith("0x") ? s.trim() : "0x" + s.trim();
@@ -37,21 +39,37 @@ type ResolveStatus = "idle" | "resolving" | "found" | "not_found";
 export function PayPage() {
   const { identifier } = useParams<{ identifier: string }>();
   const navigate = useNavigate();
-  const { publicKey, connect, connecting, signTransaction } = useWallet();
+  const wallets = useConnectedWallets();
+  const { signTransaction } = useSolanaAdapterWallet();
   const cluster = getCluster();
   const config = getConfigForCluster(cluster);
   const [resolveStatus, setResolveStatus] = useState<ResolveStatus>("idle");
   const [resolvedMeta, setResolvedMeta] = useState<Hex | null>(null);
   const [displayName, setDisplayName] = useState<string>("");
 
+  const payableChains = useMemo(
+    () =>
+      ([
+        ...(wallets.solana.connected && signTransaction ? (["solana"] as const) : []),
+        ...(wallets.ethereum.connected && wallets.ethereum.walletClient ? (["ethereum"] as const) : []),
+      ]) as ChainKey[],
+    [wallets.solana.connected, signTransaction, wallets.ethereum.connected, wallets.ethereum.walletClient],
+  );
+  const [chain, setChain] = useState<ChainKey>("solana");
+  useEffect(() => {
+    if (!payableChains.includes(chain) && payableChains.length > 0) setChain(payableChains[0]);
+  }, [payableChains, chain]);
+
+  const asset = NATIVE_ASSET[chain];
+  const payerAddress = chain === "solana" ? wallets.solana.address : wallets.ethereum.address;
+
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [txChain, setTxChain] = useState<ChainKey>("solana");
   const [sending, setSending] = useState(false);
   const [activeBalance, setActiveBalance] = useState<bigint | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
-
-  const address = publicKey?.toBase58() ?? null;
 
   useEffect(() => {
     const id = identifier?.trim();
@@ -63,45 +81,40 @@ export function PayPage() {
     setDisplayName(id);
     setResolveStatus("resolving");
     setResolvedMeta(null);
-    let cancelled = false;
 
-    (async () => {
-      try {
-        // Direct stealth meta-address in the URL is the supported form. (.sol/SNS name resolution
-        // is not implemented, so those resolve to not_found.)
-        if (isEnsName(id)) {
-          setResolveStatus("not_found");
-          return;
-        }
-        const with0x = id.startsWith("0x") ? id : "0x" + id;
-        if (isDirectMetaAddress(with0x)) {
-          setResolvedMeta(with0x as Hex);
-          setResolveStatus("found");
-        } else {
-          setResolveStatus("not_found");
-        }
-      } catch {
-        if (!cancelled) setResolveStatus("not_found");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    // Direct stealth meta-address in the URL is the supported form. (.sol/SNS name resolution
+    // is not implemented, so those resolve to not_found.)
+    if (isEnsName(id)) {
+      setResolveStatus("not_found");
+      return;
+    }
+    const with0x = id.startsWith("0x") ? id : "0x" + id;
+    if (isDirectMetaAddress(with0x)) {
+      setResolvedMeta(with0x as Hex);
+      setResolveStatus("found");
+    } else {
+      setResolveStatus("not_found");
+    }
   }, [identifier]);
 
   useEffect(() => {
-    if (!address) {
+    if (!payerAddress) {
       setActiveBalance(null);
       return;
     }
-    const connection = new Connection(getRpcUrl(), "confirmed");
     let cancelled = false;
     setBalanceLoading(true);
     (async () => {
       try {
-        const owner = new PublicKey(address);
-        const lamports = await connection.getBalance(owner);
-        if (!cancelled) setActiveBalance(BigInt(lamports));
+        let raw: bigint;
+        if (chain === "solana") {
+          const connection = new Connection(getRpcUrl(), "confirmed");
+          raw = BigInt(await connection.getBalance(new PublicKey(payerAddress)));
+        } else {
+          const publicClient = createPublicClient({ transport: http(SEPOLIA_RPC_URL) });
+          raw = await publicClient.getBalance({ address: payerAddress as Address });
+        }
+        if (!cancelled) setActiveBalance(raw);
       } catch {
         if (!cancelled) setActiveBalance(null);
       } finally {
@@ -111,37 +124,32 @@ export function PayPage() {
     return () => {
       cancelled = true;
     };
-  }, [address]);
-
-  const solFeeReserve = address ? 10_000n : null;
+  }, [payerAddress, chain]);
 
   const maxSendableBalance = useMemo(() => {
     if (activeBalance == null) return null;
-    if (solFeeReserve != null) {
-      return activeBalance > solFeeReserve ? activeBalance - solFeeReserve : 0n;
-    }
-    return activeBalance;
-  }, [activeBalance, solFeeReserve]);
+    return activeBalance > asset.feeBuffer ? activeBalance - asset.feeBuffer : 0n;
+  }, [activeBalance, asset.feeBuffer]);
 
-  const inputLamports = useMemo(() => {
+  const inputAmount = useMemo(() => {
     const raw = amount.trim();
     if (!raw) return null;
     try {
-      return parseLamports(raw);
+      return parseNativeAmount(raw, chain);
     } catch {
       return null;
     }
-  }, [amount]);
+  }, [amount, chain]);
 
   const isInsufficientBalance = Boolean(
     maxSendableBalance != null &&
-      inputLamports != null &&
-      inputLamports > 0n &&
-      inputLamports > maxSendableBalance
+      inputAmount != null &&
+      inputAmount > 0n &&
+      inputAmount > maxSendableBalance
   );
 
   const formattedMaxBalance =
-    maxSendableBalance != null ? formatSol(maxSendableBalance) : null;
+    maxSendableBalance != null ? formatNativeAmount(maxSendableBalance, chain) : null;
 
   const handleMaxAmount = () => {
     if (maxSendableBalance == null || maxSendableBalance === 0n) return;
@@ -151,27 +159,41 @@ export function PayPage() {
   const handleSendPrivately = async () => {
     setError(null);
     setTxHash(null);
-    if (!config || !resolvedMeta || !address || !publicKey || !signTransaction) return;
-    if (inputLamports == null || inputLamports <= 0n) {
+    if (!resolvedMeta || !payableChains.includes(chain)) return;
+    if (chain === "solana" && !config) return;
+    if (inputAmount == null || inputAmount <= 0n) {
       setError("Enter a valid amount.");
       return;
     }
     setSending(true);
     try {
-      const connection = new Connection(getRpcUrl(), "confirmed");
       // Send-only client: the payer has no Opaque identity; derive the recipient's one-time
-      // stealth destination, transfer, and announce in one tx.
+      // stealth destination, transfer, and announce in one flow on the selected chain.
       const client = await createSendOnlyClient({
-        connection,
-        solanaWallet: { publicKey, signTransaction },
+        solana:
+          wallets.solana.connected && wallets.solana.publicKey && signTransaction
+            ? {
+                connection: new Connection(getRpcUrl(), "confirmed"),
+                publicKey: wallets.solana.publicKey,
+                signTransaction,
+              }
+            : undefined,
+        ethereum:
+          wallets.ethereum.connected && wallets.ethereum.address && wallets.ethereum.walletClient
+            ? {
+                address: wallets.ethereum.address as Address,
+                walletClient: wallets.ethereum.walletClient,
+              }
+            : undefined,
       });
       const result = await client.sendStealthPayment({
-        chain: "solana",
+        chain,
         recipient: resolvedMeta,
-        amount: inputLamports,
+        amount: inputAmount,
         announce: true,
       });
       setTxHash(result.txHash);
+      setTxChain(chain);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Send failed";
       setError(msg);
@@ -212,8 +234,10 @@ export function PayPage() {
     );
   }
 
-  const canSend = Boolean(address && config && resolvedMeta);
-  const showConnectPrompt = !address;
+  const canSend = Boolean(
+    payableChains.includes(chain) && resolvedMeta && (chain !== "solana" || config),
+  );
+  const showConnectPrompt = payableChains.length === 0;
 
   const recipientLabel = formatRecipientDisplay(displayName);
 
@@ -238,22 +262,43 @@ export function PayPage() {
                 </svg>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => connect()}
-              disabled={connecting}
-              className="w-full rounded-xl bg-sol-gradient px-4 py-3.5 text-base font-semibold text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {connecting ? "Connecting…" : "Connect Wallet to Pay"}
-            </button>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => void wallets.solana.connect().catch((e) => setError(e instanceof Error ? e.message : "Failed to connect"))}
+                disabled={wallets.solana.connecting}
+                className="w-full rounded-xl bg-sol-gradient px-4 py-3.5 text-base font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {wallets.solana.connecting ? "Connecting…" : "Connect Solana Wallet"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void wallets.ethereum.connect().catch((e) => setError(e instanceof Error ? e.message : "Failed to connect"))}
+                disabled={wallets.ethereum.connecting}
+                className="w-full rounded-xl border border-ink-600 bg-ink-900/60 px-4 py-3.5 text-base font-semibold text-white hover:border-sol-purple/40 disabled:opacity-50"
+              >
+                {wallets.ethereum.connecting ? "Connecting…" : "Connect Ethereum Wallet"}
+              </button>
+            </div>
+            {error && <p className="mt-4 text-red-400 text-sm">{error}</p>}
           </div>
         ) : (
           <>
             <div className="card-glass border border-ink-700/70 space-y-4">
-              <p className="text-mist text-sm">To</p>
-              <p className="text-white font-mono text-base break-all">{recipientLabel}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-mist text-sm">To</p>
+                  <p className="text-white font-mono text-base break-all">{recipientLabel}</p>
+                </div>
+                <ChainToggle
+                  value={chain}
+                  onChange={setChain}
+                  ethConnected={payableChains.includes("ethereum")}
+                  solConnected={payableChains.includes("solana")}
+                />
+              </div>
               <div>
-                <label className="block text-sm text-mist mb-1.5">Amount (SOL)</label>
+                <label className="block text-sm text-mist mb-1.5">Amount ({asset.symbol})</label>
                 <div className="relative flex rounded-lg shadow-sm">
                   <input
                     type="text"
@@ -274,14 +319,14 @@ export function PayPage() {
                 {balanceLoading && <p className="mt-1.5 text-mist/70 text-xs">Loading balance…</p>}
                 {isInsufficientBalance && formattedMaxBalance != null && (
                   <p className="mt-1.5 text-red-400 text-xs">
-                    Exceeds available balance ({formattedMaxBalance} SOL)
+                    Exceeds available balance ({formattedMaxBalance} {asset.symbol})
                   </p>
                 )}
               </div>
               {error && <p className="text-red-400 text-sm">{error}</p>}
               {txHash &&
                 (() => {
-                  const explorerUrl = getExplorerTxUrl(txHash);
+                  const explorerUrl = getExplorerTxUrl(txHash, txChain);
                   return (
                     <div className="p-3 rounded-lg bg-ink-900/50 border border-ink-700 text-sm space-y-2">
                       <div>
