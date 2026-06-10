@@ -18,13 +18,10 @@ export const SEPOLIA_RPC_URL =
 export const SOLANA_CLUSTER = getCluster();
 export const SOLANA_RPC_URL = getRpcUrl();
 
-/**
- * Dynamic-import URL for the wasm-pack `cryptography.js`. Defaults to the hosted artifact;
- * override with `VITE_WASM_URL` (e.g. a copied local `/pkg/cryptography.js`).
- */
+/** Dynamic-import URL for the wasm-pack `cryptography.js`. Override with `VITE_WASM_URL`. */
 export const WASM_MODULE_SPECIFIER =
   (import.meta.env.VITE_WASM_URL as string | undefined)?.trim() ||
-  "https://www.opaque.cash/pkg/cryptography.js";
+  "/pkg/cryptography.js";
 
 /**
  * Placeholder EVM address used when no Ethereum wallet is connected. The stealth identity is
