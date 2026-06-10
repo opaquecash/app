@@ -21,7 +21,7 @@ export const SOLANA_RPC_URL = getRpcUrl();
 /** Dynamic-import URL for the wasm-pack `cryptography.js`. Override with `VITE_WASM_URL`. */
 export const WASM_MODULE_SPECIFIER =
   (import.meta.env.VITE_WASM_URL as string | undefined)?.trim() ||
-  "/pkg/cryptography.js";
+  new URL("/pkg/cryptography.js", import.meta.url).href;
 
 /**
  * Placeholder EVM address used when no Ethereum wallet is connected. The stealth identity is
