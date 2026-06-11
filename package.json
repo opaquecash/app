@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@opaquecash/adapter": "file:../sdk/packages/adapter",
+    "@opaquecash/deployments": "file:../sdk/packages/deployments",
     "@opaquecash/opaque": "file:../sdk/packages/opaque",
     "@opaquecash/psr-chain": "file:../sdk/packages/psr-chain",
     "@opaquecash/psr-chain-solana": "file:../sdk/packages/psr-chain-solana",
@@ -23,7 +24,6 @@
     "@opaquecash/stealth-core": "file:../sdk/packages/stealth-core",
     "@opaquecash/stealth-wasm": "file:../sdk/packages/stealth-wasm",
     "@opaquecash/uab": "file:../sdk/packages/uab",
-    "@tanstack/react-query": "^5.59.0",
     "@solana/wallet-adapter-base": "^0.9.23",
     "@solana/wallet-adapter-phantom": "^0.9.29",
     "@solana/wallet-adapter-react": "^0.15.35",
@@ -31,6 +31,7 @@
     "@solana/wallet-adapter-solflare": "^0.6.33",
     "@solana/wallet-adapter-wallets": "^0.19.32",
     "@solana/web3.js": "^1.98.0",
+    "@tanstack/react-query": "^5.59.0",
     "buffer": "^6.0.3",
     "driver.js": "^1.4.0",
     "framer-motion": "^12.34.2",
