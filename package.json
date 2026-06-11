@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "check:setup-message": "node scripts/check-setup-message.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@opaquecash/adapter": "file:../sdk/packages/adapter",
@@ -48,6 +49,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.2.0",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",

@@ -34,3 +34,31 @@ export const WASM_MODULE_SPECIFIER =
  */
 export const PLACEHOLDER_EVM_ADDRESS =
   "0x0000000000000000000000000000000000000000" as const;
+
+/**
+ * Optional EVM scan lookback (blocks). When `VITE_EVM_SCAN_WINDOW` is set, inbox
+ * scans pass `fromBlock = latest - window` instead of scanning from genesis: faster
+ * on live Sepolia and required for deterministic E2E runs against a local fork
+ * (full-range getLogs proxies to the upstream RPC and rate-limits).
+ */
+export const EVM_SCAN_WINDOW = (() => {
+  const raw = (import.meta.env.VITE_EVM_SCAN_WINDOW as string | undefined)?.trim();
+  const n = raw ? Number(raw) : 0;
+  return Number.isFinite(n) && n > 0 ? BigInt(Math.floor(n)) : null;
+})();
+
+/** Resolve the scan lower bound for the configured window (undefined = adapter default). */
+export async function evmScanFromBlock(): Promise<bigint | undefined> {
+  if (!EVM_SCAN_WINDOW) return undefined;
+  try {
+    const res = await fetch(SEPOLIA_RPC_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+    });
+    const head = BigInt(((await res.json()) as { result: string }).result);
+    return head > EVM_SCAN_WINDOW ? head - EVM_SCAN_WINDOW : 0n;
+  } catch {
+    return undefined;
+  }
+}

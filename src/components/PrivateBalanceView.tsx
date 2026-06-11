@@ -8,7 +8,7 @@ import {
 import { hexToBytes, bytesToHex, shortenAddress } from "../lib/format";
 import { getRpcUrl, getCluster } from "../lib/chain";
 import { NATIVE_ASSET, formatNativeAmount, type ChainKey } from "../lib/chainAssets";
-import { SEPOLIA_RPC_URL } from "../opaque/config";
+import { SEPOLIA_RPC_URL, evmScanFromBlock } from "../opaque/config";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import { useConnectedWallets } from "../hooks/useConnectedWallets";
 import type { ProtocolStep } from "./ProtocolStepper";
@@ -130,7 +130,18 @@ export function PrivateBalanceView() {
     setLoading(true);
     (async () => {
       try {
-        const outputs = await client.scan({ chains: SCAN_CHAINS });
+        // Scan chains independently so one chain's RPC outage (e.g. a devnet
+        // "long-term storage" error) cannot blank the other chain's payments.
+        const fromBlock = await evmScanFromBlock();
+        const perChain = await Promise.allSettled(
+          SCAN_CHAINS.map((c) => client.scan({ chains: [c], fromBlock })),
+        );
+        const outputs = perChain.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+        perChain.forEach((r, i) => {
+          if (r.status === "rejected") {
+            console.warn(`[Opaque] ${SCAN_CHAINS[i]} scan failed; showing other chains`, r.reason);
+          }
+        });
         const balances = await client.getBalancesForOutputs(outputs);
         if (cancelled) return;
         const txs: FoundTx[] = outputs.map((o, i) => ({
