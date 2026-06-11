@@ -20,6 +20,21 @@ const isMetaAddress = (value: string): boolean => {
   return normalized.length === 2 + 66 * 2 && (normalized.startsWith("0x02") || normalized.startsWith("0x03"));
 };
 
+/** Name-shaped recipients resolved through the SDK (ONS / ENS / SNS). */
+const isNameInput = (value: string): boolean => /^[^\s]+\.(eth|sol)$/i.test(value);
+
+/** Human label per `resolveRecipient` source tag. */
+const RESOLVE_SOURCE_LABEL: Record<string, string> = {
+  "ons-mirror": "ONS via Solana mirror (no Ethereum RPC)",
+  "ons-registry": "ONS via Ethereum registry",
+  "ens-text": "ENS com.opaque.meta record",
+  "sns-record": "SNS Records V2 (TXT)",
+  "evm-registry": "Ethereum stealth registry",
+  "solana-registry": "Solana stealth registry",
+  "ipfs-did": "IPFS DID document",
+  "meta-address": "meta-address",
+};
+
 const OTHER_CHAIN_LABEL: Record<ChainKey, string> = {
   ethereum: "Solana",
   solana: "Ethereum",
@@ -58,6 +73,34 @@ export function SendView() {
   const [steps, setSteps] = useState<ProtocolStep[]>([]);
   const [activeBalance, setActiveBalance] = useState<bigint | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [resolved, setResolved] = useState<{ metaAddressHex: string; source: string } | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+
+  // Resolve name-shaped recipients as the user types (ONS mirror-first, then ENS/SNS),
+  // so the sender sees the meta-address and resolution path before sending.
+  useEffect(() => {
+    const value = recipient.trim();
+    setResolved(null);
+    setResolveError(null);
+    if (!client || !value || isMetaAddress(value) || !isNameInput(value)) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setResolving(true);
+      try {
+        const r = await client.resolveRecipient(value);
+        if (!cancelled) setResolved({ metaAddressHex: r.metaAddressHex, source: r.source });
+      } catch (e) {
+        if (!cancelled) setResolveError(e instanceof Error ? e.message : "Name did not resolve.");
+      } finally {
+        if (!cancelled) setResolving(false);
+      }
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [recipient, client]);
 
   useEffect(() => {
     if (!senderAddress) {
@@ -138,8 +181,12 @@ export function SendView() {
       setError("Enter recipient and amount.");
       return;
     }
-    if (!isMetaAddress(recipientMeta)) {
-      setError("Enter a valid stealth meta-address (0x + 132 hex chars).");
+    if (!isMetaAddress(recipientMeta) && !(isNameInput(recipientMeta) && resolved)) {
+      setError(
+        isNameInput(recipientMeta)
+          ? (resolveError ?? "Waiting for the name to resolve…")
+          : "Enter a stealth meta-address (0x + 132 hex) or a name (alice.opqtest.eth, .eth, .sol).",
+      );
       return;
     }
 
@@ -258,14 +305,26 @@ export function SendView() {
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm text-neutral-500 mb-1.5">Recipient Meta-Address</label>
+          <label className="block text-sm text-neutral-500 mb-1.5">Recipient</label>
           <input
             type="text"
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
-            placeholder="0x02… (132 hex chars)"
+            placeholder="0x02… meta-address or alice.opqtest.eth"
             className="input-field"
           />
+          {resolving && (
+            <p className="mt-1.5 text-neutral-600 text-xs">Resolving name…</p>
+          )}
+          {resolved && (
+            <p className="mt-1.5 text-xs text-success break-all">
+              {shortenAddress(resolved.metaAddressHex)} ·{" "}
+              {RESOLVE_SOURCE_LABEL[resolved.source] ?? resolved.source}
+            </p>
+          )}
+          {resolveError && !resolving && (
+            <p className="mt-1.5 text-xs text-error">{resolveError}</p>
+          )}
         </div>
         <div>
           <label className="block text-sm text-neutral-500 mb-1.5">Amount ({asset.symbol})</label>

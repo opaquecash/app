@@ -5,6 +5,7 @@ import { bytesToHex } from "../lib/format";
 import { getCluster } from "../lib/chain";
 import { useGhostAddressStore } from "../store/ghostAddressStore";
 import { useWatchlistStore } from "../hooks/useWatchlist";
+import { OnsNameCard } from "./OnsNameCard";
 
 type Mode = "choose" | "payment_link" | "manual_ghost";
 
@@ -99,6 +100,7 @@ export function ReceiveView({ onBack }: { onBack: () => void }) {
             <p className="mt-4 text-xs font-medium text-mist/70 transition-colors group-hover:text-sol-purple">Open flow →</p>
           </button>
         </div>
+        <OnsNameCard />
         <button
           type="button"
           onClick={onBack}
