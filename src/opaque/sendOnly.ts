@@ -6,11 +6,15 @@
  * pure DKSAP + transaction building).
  */
 
-import { OpaqueClient } from "@opaquecash/opaque";
+import {
+  OpaqueClient,
+  type EvmUnifiedSigner,
+  type SolanaUnifiedSigner,
+  type UnifiedSigner,
+} from "@opaquecash/opaque";
 import type { Address, Hex } from "viem";
 import type { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import {
-  PLACEHOLDER_EVM_ADDRESS,
   SEPOLIA_CHAIN_ID,
   SEPOLIA_RPC_URL,
   SOLANA_CLUSTER,
@@ -33,24 +37,38 @@ export function createSendOnlyClient(params: {
   if (!params.solana && !params.ethereum) {
     throw new Error("createSendOnlyClient: connect a Solana or Ethereum wallet first.");
   }
-  // The app and the file:-linked SDK resolve separate copies of viem; cast the WalletClient
-  // across that one nominal-type boundary.
-  const ethereumWalletClient = (params.ethereum?.walletClient ?? undefined) as Parameters<
-    typeof OpaqueClient.create
-  >[0]["ethereumWalletClient"];
-  return OpaqueClient.create({
+  // The app and the file:-linked SDK resolve separate copies of viem / @solana/web3.js;
+  // cast across that one nominal-type boundary.
+  const wallets: UnifiedSigner[] = [
+    ...(params.ethereum
+      ? [
+          {
+            chain: "ethereum",
+            address: params.ethereum.address,
+            walletClient: params.ethereum.walletClient,
+          } as EvmUnifiedSigner,
+        ]
+      : []),
+    ...(params.solana
+      ? [
+          {
+            chain: "solana",
+            publicKey: params.solana.publicKey,
+            signTransaction: params.solana.signTransaction,
+          } as unknown as SolanaUnifiedSigner,
+        ]
+      : []),
+  ];
+  return OpaqueClient.fromWallet({
+    wallets,
+    // Fixed placeholder: send-only flows never use the client's own derived keys.
+    walletSignature: SEND_ONLY_SIGNATURE,
     chainId: SEPOLIA_CHAIN_ID,
     rpcUrl: SEPOLIA_RPC_URL,
-    walletSignature: SEND_ONLY_SIGNATURE,
-    ethereumAddress: (params.ethereum?.address ?? PLACEHOLDER_EVM_ADDRESS) as Address,
     solana: {
       cluster: SOLANA_CLUSTER,
       rpcUrl: SOLANA_RPC_URL,
       ...(params.solana ? { connection: params.solana.connection } : {}),
     },
-    ethereumWalletClient,
-    solanaWallet: params.solana
-      ? { publicKey: params.solana.publicKey, signTransaction: params.solana.signTransaction }
-      : undefined,
   });
 }

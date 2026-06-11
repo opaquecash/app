@@ -14,7 +14,14 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useConnection, useWallet as useSolanaWallet } from "@solana/wallet-adapter-react";
 import { useAccount, useWalletClient } from "wagmi";
-import { OpaqueClient, SETUP_MESSAGE } from "@opaquecash/opaque";
+import {
+  OpaqueClient,
+  SETUP_MESSAGE,
+  requestSetupSignature,
+  type EvmUnifiedSigner,
+  type SolanaUnifiedSigner,
+  type UnifiedSigner,
+} from "@opaquecash/opaque";
 import type { Connection } from "@solana/web3.js";
 import type { PublicKey, Transaction } from "@solana/web3.js";
 import type { Address, Hex } from "viem";
@@ -27,7 +34,6 @@ import {
 } from "../lib/signatureSession";
 import {
   ETHEREUM_SESSION_SCOPE,
-  PLACEHOLDER_EVM_ADDRESS,
   SEPOLIA_CHAIN_ID,
   SEPOLIA_RPC_URL,
   SOLANA_CLUSTER,
@@ -36,12 +42,6 @@ import {
 } from "./config";
 
 export type OpaqueChain = "ethereum" | "solana";
-
-function sigBytesToHex(sigBytes: Uint8Array): Hex {
-  return `0x${Array.from(sigBytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")}` as Hex;
-}
 
 type Signers = {
   connection: Connection;
@@ -61,26 +61,45 @@ function fingerprintSigners(s: Signers): string {
   ].join("|");
 }
 
+/**
+ * Connected wallets in the SDK's unified signer shape. The app and the file:-linked SDK
+ * resolve separate copies of viem / @solana/web3.js, so structurally identical types are
+ * nominally distinct; cast across this one boundary.
+ */
+function unifiedWallets(s: Signers): UnifiedSigner[] {
+  return [
+    ...(s.ethereumAddress && s.walletClient
+      ? [
+          {
+            chain: "ethereum",
+            address: s.ethereumAddress,
+            walletClient: s.walletClient,
+          } as EvmUnifiedSigner,
+        ]
+      : []),
+    ...(s.publicKey && s.signTransaction
+      ? [
+          {
+            chain: "solana",
+            publicKey: s.publicKey,
+            signTransaction: s.signTransaction,
+          } as unknown as SolanaUnifiedSigner,
+        ]
+      : []),
+  ];
+}
+
 async function buildClient(signature: Hex, s: Signers): Promise<OpaqueClient> {
-  // The app and the file:-linked SDK resolve separate copies of viem, so the structurally
-  // identical WalletClient types are nominally distinct; cast across this one boundary.
-  const ethereumWalletClient = (s.walletClient ?? undefined) as Parameters<
-    typeof OpaqueClient.create
-  >[0]["ethereumWalletClient"];
-  return OpaqueClient.create({
+  // The cached signature means fromWallet never prompts here; wallets only wire the
+  // per-chain write signers (Solana-only sessions keep working with a placeholder EVM
+  // address inside the SDK, never used for writes).
+  return OpaqueClient.fromWallet({
+    wallets: unifiedWallets(s),
+    walletSignature: signature,
     chainId: SEPOLIA_CHAIN_ID,
     rpcUrl: SEPOLIA_RPC_URL,
-    walletSignature: signature,
-    // Real address only when an Ethereum wallet is connected; the placeholder keeps reads
-    // working for Solana-only sessions and is never used for writes.
-    ethereumAddress: (s.ethereumAddress ?? PLACEHOLDER_EVM_ADDRESS) as Address,
     wasmModuleSpecifier: WASM_MODULE_SPECIFIER,
     solana: { cluster: SOLANA_CLUSTER, rpcUrl: SOLANA_RPC_URL, connection: s.connection },
-    ethereumWalletClient,
-    solanaWallet:
-      s.publicKey && s.signTransaction
-        ? { publicKey: s.publicKey, signTransaction: s.signTransaction }
-        : undefined,
   });
 }
 
@@ -118,8 +137,11 @@ export function useOpaqueSession() {
         });
         if (!sigHex) {
           setStatus("Requesting signature over SETUP_MESSAGE…");
-          const sigBytes = await signMessage(new TextEncoder().encode(SETUP_MESSAGE));
-          sigHex = sigBytesToHex(sigBytes);
+          sigHex = await requestSetupSignature({
+            chain: "solana",
+            publicKey: address,
+            signMessage,
+          });
           await saveSignatureSession({
             signatureHex: sigHex,
             address,
@@ -140,7 +162,11 @@ export function useOpaqueSession() {
         });
         if (!sigHex) {
           setStatus("Requesting signature over SETUP_MESSAGE…");
-          sigHex = (await walletClient.signMessage({ message: SETUP_MESSAGE })) as Hex;
+          sigHex = await requestSetupSignature({
+            chain: "ethereum",
+            address: ethereumAddress,
+            walletClient,
+          } as unknown as EvmUnifiedSigner);
           await saveSignatureSession({
             signatureHex: sigHex,
             address: ethereumAddress,
