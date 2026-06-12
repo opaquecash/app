@@ -4,17 +4,33 @@
  * injected connector.
  */
 
-import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useAccount, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { injected } from "wagmi/connectors";
+import { SEPOLIA_CHAIN_ID } from "../opaque/config";
 
 function shortEth(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
 export function EthConnectButton() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chainId } = useAccount();
   const { connect, isPending } = useConnect();
   const { disconnect } = useDisconnect();
+  const { switchChain, isPending: isSwitching } = useSwitchChain();
+
+  if (isConnected && address && chainId !== SEPOLIA_CHAIN_ID) {
+    return (
+      <button
+        type="button"
+        onClick={() => switchChain({ chainId: SEPOLIA_CHAIN_ID })}
+        disabled={isSwitching}
+        title="Your Ethereum wallet is on the wrong network — Opaque runs on Sepolia"
+        className="rounded-lg border border-amber-500/40 bg-amber-950/30 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:border-amber-400/60 hover:text-amber-100 disabled:opacity-50"
+      >
+        {isSwitching ? "Switching…" : "Switch to Sepolia"}
+      </button>
+    );
+  }
 
   if (isConnected && address) {
     return (
@@ -31,7 +47,7 @@ export function EthConnectButton() {
   return (
     <button
       type="button"
-      onClick={() => connect({ connector: injected() })}
+      onClick={() => connect({ connector: injected(), chainId: SEPOLIA_CHAIN_ID })}
       disabled={isPending}
       title="Connect an Ethereum wallet for Ethereum-side actions"
       className="rounded-lg border border-ink-600 bg-ink-900/60 px-3 py-1.5 text-xs font-medium text-mist transition-colors hover:border-sol-purple/30 hover:text-white disabled:opacity-50"

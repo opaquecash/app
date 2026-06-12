@@ -13,7 +13,8 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { useConnection, useWallet as useSolanaWallet } from "@solana/wallet-adapter-react";
-import { useAccount, useWalletClient } from "wagmi";
+import { useAccount, useSwitchChain, useWalletClient } from "wagmi";
+import { getWalletClient } from "wagmi/actions";
 import {
   OpaqueClient,
   SETUP_MESSAGE,
@@ -25,6 +26,7 @@ import {
 import type { Connection } from "@solana/web3.js";
 import type { PublicKey, Transaction } from "@solana/web3.js";
 import type { Address, Hex } from "viem";
+import { wagmiConfig } from "./wagmi";
 import { useOpaqueStore, type DerivationSource } from "./store";
 import {
   clearSignatureSession,
@@ -106,8 +108,9 @@ async function buildClient(signature: Hex, s: Signers): Promise<OpaqueClient> {
 export function useOpaqueSession() {
   const { connection } = useConnection();
   const { publicKey, signMessage, signTransaction } = useSolanaWallet();
-  const { address: ethereumAddress } = useAccount();
+  const { address: ethereumAddress, chainId: ethereumChainId } = useAccount();
   const { data: walletClient } = useWalletClient();
+  const { switchChainAsync } = useSwitchChain();
 
   const client = useOpaqueStore((s) => s.client);
   const metaAddress = useOpaqueStore((s) => s.metaAddress);
@@ -123,6 +126,27 @@ export function useOpaqueSession() {
     async (opts: { derivationSource: DerivationSource; remember?: boolean }): Promise<OpaqueClient> => {
       const source = opts.derivationSource;
       let sigHex: Hex | null = null;
+      let evmWalletClient: unknown = walletClient ?? null;
+
+      // A connected EVM wallet on the wrong network leaves useWalletClient empty (its query
+      // throws ConnectorChainMismatchError), which used to surface as "not connected". Switch
+      // to Sepolia and fetch the client imperatively instead.
+      if (ethereumAddress && !evmWalletClient) {
+        setStatus("Switching Ethereum wallet to Sepolia…");
+        try {
+          if (ethereumChainId !== SEPOLIA_CHAIN_ID) {
+            await switchChainAsync({ chainId: SEPOLIA_CHAIN_ID });
+          }
+          evmWalletClient = await getWalletClient(wagmiConfig, { chainId: SEPOLIA_CHAIN_ID });
+        } catch {
+          evmWalletClient = null;
+          if (source === "ethereum") {
+            throw new Error(
+              "Your Ethereum wallet is connected but on the wrong network. Switch it to Sepolia and try again.",
+            );
+          }
+        }
+      }
 
       if (source === "solana") {
         if (!publicKey || !signMessage) {
@@ -151,7 +175,7 @@ export function useOpaqueSession() {
           });
         }
       } else {
-        if (!ethereumAddress || !walletClient) {
+        if (!ethereumAddress || !evmWalletClient) {
           throw new Error("Connect an Ethereum wallet (MetaMask or another injected wallet) to derive keys from it.");
         }
         setStatus("Restoring session…");
@@ -165,7 +189,7 @@ export function useOpaqueSession() {
           sigHex = await requestSetupSignature({
             chain: "ethereum",
             address: ethereumAddress,
-            walletClient,
+            walletClient: evmWalletClient,
           } as unknown as EvmUnifiedSigner);
           await saveSignatureSession({
             signatureHex: sigHex,
@@ -181,7 +205,7 @@ export function useOpaqueSession() {
       const s: Signers = {
         connection,
         ethereumAddress,
-        walletClient: walletClient ?? null,
+        walletClient: evmWalletClient,
         publicKey,
         signTransaction,
       };
@@ -202,6 +226,8 @@ export function useOpaqueSession() {
       signTransaction,
       walletClient,
       ethereumAddress,
+      ethereumChainId,
+      switchChainAsync,
       connection,
       setSession,
       setStatus,

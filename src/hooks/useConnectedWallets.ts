@@ -7,6 +7,7 @@
 import { useCallback } from "react";
 import { useAccount, useConnect, useDisconnect, useWalletClient } from "wagmi";
 import { injected } from "wagmi/connectors";
+import { SEPOLIA_CHAIN_ID } from "../opaque/config";
 import { useWallet } from "./useWallet";
 
 export type ChainKey = "ethereum" | "solana";
@@ -22,7 +23,9 @@ export function useConnectedWallets() {
   const ethereumConnected = ethIsConnected && ethAddress != null;
 
   const connectEthereum = useCallback(async () => {
-    await connectAsync({ connector: injected() });
+    // Request Sepolia at connect time: the wallet prompts to switch if it's on another
+    // network, so useWalletClient doesn't fail with a chain mismatch afterwards.
+    await connectAsync({ connector: injected(), chainId: SEPOLIA_CHAIN_ID });
   }, [connectAsync]);
 
   const connectedChains: ChainKey[] = [
