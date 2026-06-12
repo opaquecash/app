@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import type { DiscoveredTrait, IndexerAnnouncement } from "@opaquecash/opaque";
+import type { DiscoveredTrait, IndexerAnnouncement, OpaqueClient } from "@opaquecash/opaque";
 import { useWallet } from "../hooks/useWallet";
 import { getCluster } from "../lib/chain";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
@@ -21,7 +21,7 @@ import { shortenAddress } from "../lib/format";
 import type { Tab } from "./Layout";
 import { ProofGeneratorModal } from "./ProofGeneratorModal";
 
-/** Map a cached Solana announcement into the indexer row shape client.discoverTraits expects. */
+/** Map a cached Solana announcement into the indexer row shape OpaqueClient discovery expects. */
 function cachedToRow(c: CachedAnnouncement): IndexerAnnouncement {
   return {
     blockNumber: String(c.slot),
@@ -37,13 +37,37 @@ function cachedToRow(c: CachedAnnouncement): IndexerAnnouncement {
 /** A discovered trait tagged with the chain whose native announcer it was found on. */
 export type ChainTaggedTrait = DiscoveredTrait & { chain: "ethereum" | "solana" };
 
+async function discoverNativeTraits(
+  client: OpaqueClient,
+  chain: ChainTaggedTrait["chain"],
+  rows: IndexerAnnouncement[],
+): Promise<ChainTaggedTrait[]> {
+  if (rows.length === 0) return [];
+  const traits: DiscoveredTrait[] = [];
+  const v2 = await Promise.allSettled([
+    client.discoverTraitsV2(rows, { chain }),
+    client.discoverTraits(rows),
+  ]);
+  if (v2[0].status === "fulfilled") traits.push(...v2[0].value);
+  else console.warn(`[MyTraitsView] ${chain} V2 trait discovery failed:`, v2[0].reason);
+  if (v2[1].status === "fulfilled") traits.push(...v2[1].value);
+  else console.warn(`[MyTraitsView] ${chain} legacy trait discovery failed:`, v2[1].reason);
+  return traits.map((t) => ({ ...t, chain }));
+}
+
 function TraitCard({ trait, onProve }: { trait: ChainTaggedTrait; onProve: (t: ChainTaggedTrait) => void }) {
+  const traitTitle =
+    trait.schemaName ??
+    (trait.schemaId ? `Schema ${shortenAddress(trait.schemaId, 8, 6)}` : `Trait #${trait.attestationId}`);
   return (
     <div className="rounded-xl border border-ink-700 bg-ink-900 px-5 py-4 space-y-3 hover:border-ink-600 transition-colors">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-semibold text-white text-sm truncate">Trait #{trait.attestationId}</p>
+          <p className="font-semibold text-white text-sm truncate">{traitTitle}</p>
           <p className="text-xs text-mist mt-0.5 font-mono truncate">{shortenAddress(trait.stealthAddress, 10, 6)}</p>
+          {trait.attestationUid && (
+            <p className="text-[11px] text-ink-500 mt-0.5 font-mono truncate">{shortenAddress(trait.attestationUid, 8, 6)}</p>
+          )}
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-400">
@@ -105,8 +129,7 @@ export function MyTraitsView({ onNavigate }: MyTraitsViewProps = {}) {
         const tagged: ChainTaggedTrait[] = [];
         try {
           if (rows.length > 0) {
-            const solanaTraits = await client.discoverTraits(rows);
-            tagged.push(...solanaTraits.map((t) => ({ ...t, chain: "solana" as const })));
+            tagged.push(...await discoverNativeTraits(client, "solana", rows));
           }
         } catch (err) {
           console.warn("[MyTraitsView] Solana trait discovery failed:", err);
@@ -114,15 +137,14 @@ export function MyTraitsView({ onNavigate }: MyTraitsViewProps = {}) {
         try {
           const evmRows = await client.fetchAnnouncementRows("ethereum");
           if (evmRows.length > 0) {
-            const evmTraits = await client.discoverTraits(evmRows);
-            tagged.push(...evmTraits.map((t) => ({ ...t, chain: "ethereum" as const })));
+            tagged.push(...await discoverNativeTraits(client, "ethereum", evmRows));
           }
         } catch (err) {
           console.warn("[MyTraitsView] Ethereum trait discovery failed:", err);
         }
         const seen = new Set<string>();
         const deduped = tagged.filter((t) => {
-          const key = `${t.chain}-${t.attestationId}-${t.txHash}`;
+          const key = `${t.chain}-${t.attestationUid ?? t.attestationId}-${t.txHash}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
@@ -166,7 +188,7 @@ export function MyTraitsView({ onNavigate }: MyTraitsViewProps = {}) {
       {traits.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {traits.map((trait) => (
-            <TraitCard key={`${trait.chain}-${trait.attestationId}-${trait.txHash}`} trait={trait} onProve={setActiveProofTrait} />
+            <TraitCard key={`${trait.chain}-${trait.attestationUid ?? trait.attestationId}-${trait.txHash}`} trait={trait} onProve={setActiveProofTrait} />
           ))}
         </div>
       ) : (
