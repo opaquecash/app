@@ -100,11 +100,16 @@ export function MyTraitsView({ onNavigate }: MyTraitsViewProps = {}) {
     (async () => {
       try {
         // Per-chain discovery so each trait carries the chain its attestation lives on
-        // (the verifier, merkle root, and proof submission are all per chain).
+        // (the verifier, merkle root, and proof submission are all per chain). Each chain
+        // fails independently — one chain's RPC outage must not blank the other's traits.
         const tagged: ChainTaggedTrait[] = [];
-        if (rows.length > 0) {
-          const solanaTraits = await client.discoverTraits(rows);
-          tagged.push(...solanaTraits.map((t) => ({ ...t, chain: "solana" as const })));
+        try {
+          if (rows.length > 0) {
+            const solanaTraits = await client.discoverTraits(rows);
+            tagged.push(...solanaTraits.map((t) => ({ ...t, chain: "solana" as const })));
+          }
+        } catch (err) {
+          console.warn("[MyTraitsView] Solana trait discovery failed:", err);
         }
         try {
           const evmRows = await client.fetchAnnouncementRows("ethereum");

@@ -51,6 +51,8 @@ export type FoundTx = {
   /** Actual account holding the funds (base58 on Solana, 0x on Ethereum). */
   holderAddress?: string;
   balance: bigint;
+  /** The balance RPC lookup failed — show the payment instead of hiding it as zero. */
+  balanceUnknown?: boolean;
   /** 33-byte compressed ephemeral pubkey (hex) the SDK sweeps from. */
   ephemeralPublicKey?: string;
   txHash: string;
@@ -142,7 +144,19 @@ export function PrivateBalanceView() {
             console.warn(`[Opaque] ${SCAN_CHAINS[i]} scan failed; showing other chains`, r.reason);
           }
         });
-        const balances = await client.getBalancesForOutputs(outputs);
+        // Balance lookups settle per output: one chain's (or one output's) RPC failure
+        // must not blank everything the scans just found.
+        const balances = await Promise.all(
+          outputs.map((o) =>
+            client.getBalancesForOutputs([o]).then(
+              (b) => b[0],
+              (err) => {
+                console.warn(`[Opaque] ${o.chain} balance lookup failed for ${o.stealthAddress}`, err);
+                return undefined;
+              },
+            ),
+          ),
+        );
         if (cancelled) return;
         const txs: FoundTx[] = outputs.map((o, i) => ({
           id: `${o.chain}-${o.transactionHash}-${o.logIndex}`,
@@ -150,6 +164,7 @@ export function PrivateBalanceView() {
           address: o.stealthAddress,
           holderAddress: balances[i]?.address,
           balance: balances[i]?.nativeRaw ?? 0n,
+          balanceUnknown: balances[i] === undefined,
           ephemeralPublicKey: o.ephemeralPublicKey,
           txHash: o.transactionHash,
           blockNumber: o.blockNumber,
@@ -181,7 +196,18 @@ export function PrivateBalanceView() {
         const outputs = ghostEntries.map((g) =>
           ghostOutput(g.stealthAddress, g.ephemeralPrivKeyHex as string),
         );
-        const keyed = await client.getBalancesForOutputs(outputs);
+        // Per-output settle: one failed lookup hides only that ghost, not the whole list.
+        const keyed = await Promise.all(
+          outputs.map((o) =>
+            client.getBalancesForOutputs([o]).then(
+              (b) => b[0],
+              (err) => {
+                console.warn("[Opaque] ghost balance lookup failed", err);
+                return undefined;
+              },
+            ),
+          ),
+        );
         // View-only watchlist addresses (no stored key): direct balance read on their chain.
         const viewOnly = watchlistAddresses.filter(
           (a) => !ghostEntries.some((g) => g.stealthAddress.toLowerCase() === a.toLowerCase()),
@@ -245,7 +271,9 @@ export function PrivateBalanceView() {
     const totals: Record<ChainKey, bigint> = { ethereum: 0n, solana: 0n };
     const entries: PortfolioEntry[] = [];
     for (const tx of activeTxs) {
-      if (tx.balance > 0n) {
+      // Unknown-balance rows stay visible (the payment exists; only its RPC read failed)
+      // but contribute nothing to the totals.
+      if (tx.balance > 0n || tx.balanceUnknown) {
         totals[tx.chain] += tx.balance;
         entries.push({ tx, balanceRaw: tx.balance });
       }
@@ -419,7 +447,7 @@ export function PrivateBalanceView() {
           <h3 className="font-display text-xl font-bold text-white">Stealth addresses</h3>
           <div className="space-y-3">
             {allEntries
-              .filter((e) => e.balanceRaw > 0n)
+              .filter((e) => e.balanceRaw > 0n || e.tx.balanceUnknown)
               .map(({ tx, balanceRaw }) => {
                 const asset = NATIVE_ASSET[tx.chain];
                 const amountStr = formatNativeAmount(balanceRaw, tx.chain);
@@ -468,7 +496,16 @@ export function PrivateBalanceView() {
                           />
                         )}
                       </div>
-                      <p className="text-success font-semibold mt-0.5">{amountStr} {asset.symbol}</p>
+                      {tx.balanceUnknown ? (
+                        <p
+                          className="text-amber-400 text-sm font-medium mt-0.5"
+                          title="The balance RPC call failed — refresh to retry"
+                        >
+                          Balance unavailable
+                        </p>
+                      ) : (
+                        <p className="text-success font-semibold mt-0.5">{amountStr} {asset.symbol}</p>
+                      )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {tx.source !== "announcement" && cluster != null && (
@@ -485,7 +522,7 @@ export function PrivateBalanceView() {
                       )}
                       <button
                         type="button"
-                        disabled={!canWithdraw || claimingId !== null}
+                        disabled={!canWithdraw || claimingId !== null || tx.balanceUnknown}
                         onClick={() => setClaimModalTx(tx)}
                         className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sol-gradient text-white disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:opacity-90"
                       >
