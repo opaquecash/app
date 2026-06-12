@@ -88,7 +88,8 @@ test("register, send (native + relay), scan, and sweep on the Sepolia fork", asy
 
   await test.step("connect wallet and derive stealth keys", async () => {
     await page.goto("/");
-    await page.getByRole("button", { name: "Open wallet" }).click();
+    // The landing page has two "Open wallet" CTAs (hero + closing section).
+    await page.getByRole("button", { name: "Open wallet" }).first().click();
 
     // The Ethereum row renders first; its Connect is the first Connect button.
     await page.getByRole("button", { name: "Connect", exact: true }).first().click();

@@ -215,6 +215,44 @@ body {
   font-family: var(--font-display);
 }
 
+/* ── Landing page ambient animations ── */
+
+/* Vertical announcement-feed marquee: the list is rendered twice; translating by
+   -50% loops seamlessly. */
+@keyframes feed-scroll {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+.feed-scroll {
+  animation: feed-scroll 22s linear infinite;
+}
+
+/* Privacy-pool ripple: concentric rings expanding from the deposit point. */
+@keyframes pool-ripple {
+  0% { transform: scale(0.35); opacity: 0.85; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+.pool-ripple {
+  animation: pool-ripple 3.2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+}
+
+/* Soft breathing glow for quorum/key dots. */
+@keyframes key-breathe {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+.key-breathe {
+  animation: key-breathe 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feed-scroll,
+  .pool-ripple,
+  .key-breathe {
+    animation: none;
+  }
+}
+
 @keyframes scanner-pulse {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }

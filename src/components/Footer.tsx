@@ -24,7 +24,7 @@ export function Footer() {
         </Link>
       </nav>
       <p className="font-mono text-mist/60">
-        © 2026 Opaque Protocol. Solana stealth and reputation stack.
+        © 2026 Opaque Protocol. Stealth payments for Ethereum and Solana.
       </p>
     </footer>
   );
