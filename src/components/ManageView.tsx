@@ -2,8 +2,10 @@
  * ManageView — Schema & Attestation Management
  *
  * Lists schemas the connected wallet has authority/delegate rights over and attestations it has
- * issued, with management actions (deprecate schema, add/remove delegates) via OpaqueClient on
- * Solana or Ethereum. Reads come from client.getMySchemas / client.getMyIssuedAttestations.
+ * issued, merged across ALL connected chains (each item tagged with the chain it lives on, like
+ * the balance and traits views), with management actions (deprecate schema, add/remove delegates)
+ * via OpaqueClient on the item's own chain. Reads come from client.getMySchemas /
+ * client.getMyIssuedAttestations.
  */
 
 import { useEffect, useMemo, useState, useCallback, useId } from "react";
@@ -11,12 +13,14 @@ import type { OpaqueClient, SchemaV2, AttestationV2 } from "@opaquecash/opaque";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import type { Tab } from "./Layout";
 import { ModalShell } from "./ModalShell";
-import { ChainToggle, type ToggleChain as PsrChain } from "./ChainToggle";
-import { usePsrChain } from "../hooks/usePsrChain";
+import type { ToggleChain as PsrChain } from "./ChainToggle";
 
 const ITEMS_PER_PAGE = 10;
 
+type ManagedSchema = SchemaV2 & { chain: PsrChain };
+
 interface ManagedAttestation {
+  chain: PsrChain;
   uidHex: string;
   schemaIdHex: string;
   schemaName: string;
@@ -34,6 +38,14 @@ function shortAddr(addr: string): string {
 function shortHex(hex: string): string {
   const clean = hex.startsWith("0x") ? hex : `0x${hex}`;
   return `${clean.slice(0, 10)}…${clean.slice(-6)}`;
+}
+
+function ChainBadge({ chain }: { chain: PsrChain }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-sol-purple/30 bg-sol-purple/10 px-2 py-0.5 text-[11px] font-medium text-sol-purple uppercase">
+      {chain === "ethereum" ? "ETH" : "SOL"}
+    </span>
+  );
 }
 
 function StatusBadge({ label, variant }: { label: string; variant: "green" | "red" | "yellow" | "gray" }) {
@@ -63,14 +75,13 @@ function PaginationControls({ page, totalPages, onPrev, onNext }: { page: number
 }
 
 interface SchemaCardProps {
-  schema: SchemaV2;
+  schema: ManagedSchema;
   client: OpaqueClient;
-  psrChain: PsrChain;
   onAction: (msg: string, isError?: boolean) => void;
   onRefresh: () => void;
 }
 
-function SchemaCard({ schema, client, psrChain, onAction, onRefresh }: SchemaCardProps) {
+function SchemaCard({ schema, client, onAction, onRefresh }: SchemaCardProps) {
   const uid = useId();
   const [delegateInput, setDelegateInput] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -94,15 +105,15 @@ function SchemaCard({ schema, client, psrChain, onAction, onRefresh }: SchemaCar
   );
 
   const handleDeprecate = () =>
-    runTx("Deprecate", () => client.deprecateSchema(psrChain, schema.schemaId));
+    runTx("Deprecate", () => client.deprecateSchema(schema.chain, schema.schemaId));
 
   const handleAddDelegate = () => {
     if (!delegateInput.trim()) return;
-    runTx("Add delegate", () => client.addSchemaDelegate(psrChain, schema.schemaId, delegateInput.trim()));
+    runTx("Add delegate", () => client.addSchemaDelegate(schema.chain, schema.schemaId, delegateInput.trim()));
   };
 
   const handleRemoveDelegate = (delegate: string) =>
-    runTx("Remove delegate", () => client.removeSchemaDelegate(psrChain, schema.schemaId, delegate));
+    runTx("Remove delegate", () => client.removeSchemaDelegate(schema.chain, schema.schemaId, delegate));
 
   const isBusy = busy !== null;
 
@@ -115,6 +126,7 @@ function SchemaCard({ schema, client, psrChain, onAction, onRefresh }: SchemaCar
             <p className="text-xs text-mist font-mono mt-0.5 truncate">{shortHex(schema.schemaId)}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <ChainBadge chain={schema.chain} />
             {schema.deprecated ? <StatusBadge label="Deprecated" variant="gray" /> : <StatusBadge label="Active" variant="green" />}
             {schema.revocable && <StatusBadge label="Revocable" variant="yellow" />}
           </div>
@@ -184,7 +196,10 @@ function AttestationCard({ att }: { att: ManagedAttestation }) {
           <p className="font-semibold text-white text-sm truncate">{att.schemaName}</p>
           <p className="text-xs text-mist font-mono mt-0.5">UID: {shortHex(att.uidHex)}</p>
         </div>
-        {statusBadge}
+        <div className="flex items-center gap-2 shrink-0">
+          <ChainBadge chain={att.chain} />
+          {statusBadge}
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
         <div>
@@ -211,9 +226,14 @@ interface ManageViewProps {
 }
 
 export function ManageView({ onNavigate }: ManageViewProps = {}) {
-  const { client, isSetup } = useOpaqueSession();
-  const { chain: psrChain, setChain: setPsrChain, ethConnected, solConnected } = usePsrChain();
-  const [schemas, setSchemas] = useState<SchemaV2[]>([]);
+  const { client, isSetup, canActOn } = useOpaqueSession();
+  // Every chain with a connected wallet — "my" schemas/attestations are keyed by that chain's
+  // wallet identity, so only connected chains can be read.
+  const usableChains = useMemo(
+    () => (["solana", "ethereum"] as const).filter((c) => canActOn(c)),
+    [canActOn],
+  );
+  const [schemas, setSchemas] = useState<ManagedSchema[]>([]);
   const [attestations, setAttestations] = useState<ManagedAttestation[]>([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ msg: string; isError: boolean } | null>(null);
@@ -251,34 +271,56 @@ export function ManageView({ onNavigate }: ManageViewProps = {}) {
   const totalSchemaPages = Math.max(1, Math.ceil(mySchemas.length / ITEMS_PER_PAGE));
 
   const load = useCallback(async () => {
-    if (!client) return;
+    if (!client || usableChains.length === 0) return;
     setLoading(true);
     try {
-      const [schemaRows, attestationRows] = await Promise.all([
-        client.getMySchemas(psrChain),
-        client.getMyIssuedAttestations(psrChain),
-      ]);
-      setSchemas(schemaRows);
-      const nameBySchemaId = new Map(schemaRows.map((s) => [s.schemaId.toLowerCase(), s.name]));
-      const mine: ManagedAttestation[] = attestationRows
-        .map((a: AttestationV2) => ({
-          uidHex: a.uid,
-          schemaIdHex: a.schemaId,
-          schemaName: nameBySchemaId.get(a.schemaId.toLowerCase()) ?? "Unknown Schema",
-          stealthAddressHashHex: a.stealthAddressHash,
-          createdAt: a.createdAt,
-          expirationSlot: a.expirationSlot,
-          revocationSlot: a.revocationSlot,
-          isRevoked: a.revocationSlot > 0,
-        }))
-        .sort((x, y) => y.createdAt - x.createdAt);
-      setAttestations(mine);
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Failed to load data", true);
+      // One chain failing (RPC hiccup) must not blank the other chain's items.
+      const results = await Promise.allSettled(
+        usableChains.map(async (chain) => {
+          const [schemaRows, attestationRows] = await Promise.all([
+            client.getMySchemas(chain),
+            client.getMyIssuedAttestations(chain),
+          ]);
+          return { chain, schemaRows, attestationRows };
+        }),
+      );
+      const allSchemas: ManagedSchema[] = [];
+      const allAttestations: ManagedAttestation[] = [];
+      const failedChains: PsrChain[] = [];
+      results.forEach((r, i) => {
+        if (r.status === "rejected") {
+          failedChains.push(usableChains[i]);
+          return;
+        }
+        const { chain, schemaRows, attestationRows } = r.value;
+        const nameBySchemaId = new Map(schemaRows.map((s) => [s.schemaId.toLowerCase(), s.name]));
+        allSchemas.push(...schemaRows.map((s) => ({ ...s, chain })));
+        allAttestations.push(
+          ...attestationRows.map((a: AttestationV2) => ({
+            chain,
+            uidHex: a.uid,
+            schemaIdHex: a.schemaId,
+            schemaName: nameBySchemaId.get(a.schemaId.toLowerCase()) ?? "Unknown Schema",
+            stealthAddressHashHex: a.stealthAddressHash,
+            createdAt: a.createdAt,
+            expirationSlot: a.expirationSlot,
+            revocationSlot: a.revocationSlot,
+            isRevoked: a.revocationSlot > 0,
+          })),
+        );
+      });
+      setSchemas(allSchemas);
+      setAttestations(allAttestations.sort((x, y) => y.createdAt - x.createdAt));
+      if (failedChains.length > 0) {
+        showToast(
+          `Failed to load from ${failedChains.map((c) => (c === "ethereum" ? "Ethereum" : "Solana")).join(" and ")}`,
+          true,
+        );
+      }
     } finally {
       setLoading(false);
     }
-  }, [client, psrChain, showToast]);
+  }, [client, usableChains, showToast]);
 
   useEffect(() => {
     void load();
@@ -304,9 +346,8 @@ export function ManageView({ onNavigate }: ManageViewProps = {}) {
           <p className="text-sm text-mist mt-1">Schemas you own and attestations you issued.</p>
         </div>
         <div className="flex items-center gap-2">
-          <ChainToggle value={psrChain} onChange={setPsrChain} ethConnected={ethConnected} solConnected={solConnected} />
           {onNavigate && (
-            <button type="button" onClick={() => onNavigate("attest")} className="rounded-xl bg-sol-purple px-4 py-2 text-xs font-semibold text-white hover:bg-sol-purple/90 transition-colors">Issue Attestation</button>
+            <button type="button" onClick={() => onNavigate("attest")} className="rounded-xl bg-sol-purple px-4 py-2 text-xs font-semibold text-white hover:bg-sol-purple/90 transition-colors">Issue</button>
           )}
           <button type="button" onClick={() => void load()} disabled={loading} className="rounded-xl border border-ink-700 bg-ink-900 px-4 py-2 text-xs font-medium text-white hover:bg-ink-800 disabled:opacity-50 transition-colors">
             {loading ? <span className="flex items-center gap-1.5"><span className="h-3 w-3 animate-spin rounded-full border border-ink-600 border-t-white" />Loading…</span> : "Refresh"}
@@ -341,7 +382,7 @@ export function ManageView({ onNavigate }: ManageViewProps = {}) {
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {pagedSchemas.map((schema) => (
-                  <SchemaCard key={schema.schemaId} schema={schema} client={client} psrChain={psrChain} onAction={showToast} onRefresh={() => void load()} />
+                  <SchemaCard key={`${schema.chain}-${schema.schemaId}`} schema={schema} client={client} onAction={showToast} onRefresh={() => void load()} />
                 ))}
               </div>
               <PaginationControls page={schemaPage} totalPages={totalSchemaPages} onPrev={() => setSchemaPage((p) => Math.max(1, p - 1))} onNext={() => setSchemaPage((p) => Math.min(totalSchemaPages, p + 1))} />
@@ -376,7 +417,7 @@ export function ManageView({ onNavigate }: ManageViewProps = {}) {
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {pagedAttestations.map((att) => (
-                  <AttestationCard key={att.uidHex} att={att} />
+                  <AttestationCard key={`${att.chain}-${att.uidHex}`} att={att} />
                 ))}
               </div>
               <PaginationControls page={attestationPage} totalPages={totalAttestationPages} onPrev={() => setAttestationPage((p) => Math.max(1, p - 1))} onNext={() => setAttestationPage((p) => Math.min(totalAttestationPages, p + 1))} />
