@@ -139,14 +139,14 @@ test("register, send (native + relay), scan, and sweep on the Sepolia fork", asy
 
   await test.step("send a native stealth payment to our own meta-address", async () => {
     await page.getByRole("button", { name: "Send Private send" }).click();
-    await page.getByPlaceholder("0x02… (132 hex chars)").fill(metaAddress);
+    await page.getByPlaceholder("0x02… meta-address or alice.opqtest.eth").fill(metaAddress);
     await page.getByPlaceholder("0.01").fill("0.05");
     await page.getByRole("button", { name: "Send", exact: true }).last().click();
     await expect(page.getByText("Sent.")).toBeVisible({ timeout: 90_000 });
   });
 
   await test.step("send with cross-chain relay (UAB over the forked Wormhole core)", async () => {
-    await page.getByPlaceholder("0x02… (132 hex chars)").fill(metaAddress);
+    await page.getByPlaceholder("0x02… meta-address or alice.opqtest.eth").fill(metaAddress);
     await page.getByPlaceholder("0.01").fill("0.03");
     await page.getByText("Also relay the announcement").click();
     await page.getByRole("button", { name: "Send", exact: true }).last().click();

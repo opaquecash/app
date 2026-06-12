@@ -4,8 +4,8 @@ name: E2E
 # cross-chain relay) -> scan -> sweep, on an anvil fork of Sepolia (real deployed
 # contracts, free ETH, no testnet keys). Solana stays read-only on devnet.
 #
-# The app depends on the SDK via file:../sdk/packages/*, so the sdk repo is checked
-# out as a sibling and built first.
+# The app consumes the published @opaquecash/* packages from npm, so no sibling
+# sdk checkout/build is needed.
 
 on:
   push:
@@ -18,13 +18,6 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: app
-
-      - uses: actions/checkout@v4
-        with:
-          repository: opaquecash/sdk
-          path: sdk
 
       - uses: actions/setup-node@v4
         with:
@@ -33,20 +26,13 @@ jobs:
       - name: Install foundry (anvil)
         uses: foundry-rs/foundry-toolchain@v1
 
-      - name: Build SDK
-        working-directory: sdk
-        run: npm ci && npm run build
-
       - name: Install app
-        working-directory: app
         run: npm ci
 
       - name: Install Playwright browsers
-        working-directory: app
         run: npx playwright install --with-deps chromium
 
       - name: Run E2E
-        working-directory: app
         run: npx playwright test
         env:
           FORK_URL: ${{ vars.SEPOLIA_FORK_URL || 'https://ethereum-sepolia-rpc.publicnode.com' }}
@@ -56,5 +42,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-traces
-          path: app/test-results/
+          path: test-results/
           if-no-files-found: ignore
