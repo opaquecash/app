@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import type { Connector } from "wagmi";
 import { useConnectedWallets } from "../hooks/useConnectedWallets";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import type { DerivationSource } from "../opaque/store";
+import { EvmWalletPicker } from "./EvmWalletPicker";
 import {
   getRememberSignaturePreference,
   setRememberSignaturePreference,
@@ -11,6 +13,19 @@ type Phase = "idle" | "deriving" | "error";
 
 function shorten(value: string, lead = 6, tail = 6): string {
   return value.length <= lead + tail + 1 ? value : `${value.slice(0, lead)}…${value.slice(-tail)}`;
+}
+
+/** Phantom's EVM provider rejects with "wallet must has at least one account" when it has no
+ * Ethereum account set up — translate wallet-speak into something actionable. */
+function friendlyEvmConnectError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : "";
+  if (msg.toLowerCase().includes("at least one account")) {
+    return "That wallet has no Ethereum account available. Pick a different Ethereum wallet (e.g. MetaMask) or create an account in it first.";
+  }
+  if (msg.toLowerCase().includes("user rejected")) {
+    return "Connection request was rejected in the wallet.";
+  }
+  return msg || "Failed to connect Ethereum wallet. Is MetaMask installed?";
 }
 
 function WalletRow({
@@ -73,6 +88,7 @@ export function LandingView() {
   const wallets = useConnectedWallets();
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [evmPickerOpen, setEvmPickerOpen] = useState(false);
   const [chosenSource, setChosenSource] = useState<DerivationSource | null>(null);
   const [rememberSession, setRememberSession] = useState<boolean>(() =>
     getRememberSignaturePreference(),
@@ -110,12 +126,18 @@ export function LandingView() {
     }
   };
 
-  const handleConnectEthereum = async () => {
+  const handleConnectEthereum = async (connector?: Connector) => {
     setError(null);
+    // More than one injected EVM wallet (e.g. MetaMask + Phantom): let the user pick.
+    if (!connector && wallets.ethereum.connectors.length > 1) {
+      setEvmPickerOpen(true);
+      return;
+    }
+    setEvmPickerOpen(false);
     try {
-      await wallets.ethereum.connect();
+      await wallets.ethereum.connect(connector);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to connect Ethereum wallet. Is MetaMask installed?");
+      setError(friendlyEvmConnectError(e));
       setPhase("error");
     }
   };
@@ -259,6 +281,14 @@ export function LandingView() {
           </div>
         )}
       </div>
+
+      <EvmWalletPicker
+        open={evmPickerOpen}
+        connectors={wallets.ethereum.connectors}
+        busy={wallets.ethereum.connecting}
+        onSelect={(c) => void handleConnectEthereum(c)}
+        onClose={() => setEvmPickerOpen(false)}
+      />
     </div>
   );
 }

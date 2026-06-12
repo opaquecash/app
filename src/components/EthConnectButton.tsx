@@ -1,12 +1,15 @@
 /**
  * Ethereum (Sepolia) wallet connect/disconnect, peer to `SolConnectButton`. Connecting it lights
- * up the Ethereum-side actions — register, send, scan, sweep, PSR, and UAB relay. Uses wagmi's
- * injected connector.
+ * up the Ethereum-side actions — register, send, scan, sweep, PSR, and UAB relay. With multiple
+ * injected wallets installed (MetaMask + Phantom's EVM side), opens a picker instead of letting
+ * the generic injected connector grab an arbitrary one.
  */
 
-import { useAccount, useConnect, useDisconnect, useSwitchChain } from "wagmi";
-import { injected } from "wagmi/connectors";
+import { useState } from "react";
+import { useAccount, useDisconnect, useSwitchChain } from "wagmi";
 import { SEPOLIA_CHAIN_ID } from "../opaque/config";
+import { useConnectedWallets } from "../hooks/useConnectedWallets";
+import { EvmWalletPicker } from "./EvmWalletPicker";
 
 function shortEth(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
@@ -14,9 +17,10 @@ function shortEth(addr: string): string {
 
 export function EthConnectButton() {
   const { address, isConnected, chainId } = useAccount();
-  const { connect, isPending } = useConnect();
+  const { ethereum } = useConnectedWallets();
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   if (isConnected && address && chainId !== SEPOLIA_CHAIN_ID) {
     return (
@@ -44,15 +48,36 @@ export function EthConnectButton() {
       </button>
     );
   }
+
+  const handleConnect = () => {
+    if (ethereum.connectors.length > 1) {
+      setPickerOpen(true);
+      return;
+    }
+    void ethereum.connect();
+  };
+
   return (
-    <button
-      type="button"
-      onClick={() => connect({ connector: injected(), chainId: SEPOLIA_CHAIN_ID })}
-      disabled={isPending}
-      title="Connect an Ethereum wallet for Ethereum-side actions"
-      className="rounded-lg border border-ink-600 bg-ink-900/60 px-3 py-1.5 text-xs font-medium text-mist transition-colors hover:border-sol-purple/30 hover:text-white disabled:opacity-50"
-    >
-      {isPending ? "Connecting…" : "Connect ETH"}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={handleConnect}
+        disabled={ethereum.connecting}
+        title="Connect an Ethereum wallet for Ethereum-side actions"
+        className="rounded-lg border border-ink-600 bg-ink-900/60 px-3 py-1.5 text-xs font-medium text-mist transition-colors hover:border-sol-purple/30 hover:text-white disabled:opacity-50"
+      >
+        {ethereum.connecting ? "Connecting…" : "Connect ETH"}
+      </button>
+      <EvmWalletPicker
+        open={pickerOpen}
+        connectors={ethereum.connectors}
+        busy={ethereum.connecting}
+        onSelect={(c) => {
+          setPickerOpen(false);
+          void ethereum.connect(c);
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
+    </>
   );
 }
