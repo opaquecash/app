@@ -29,6 +29,10 @@ import { getExplorerTxUrl } from "./lib/explorer";
 function AppContent() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [registrationJustCompleted, setRegistrationJustCompleted] = useState(false);
+  // One-shot: registrationJustCompleted stays true all session (it gates showDashboard), so the
+  // post-registration tour replay needs its own consumable flag or it re-fires on every
+  // return to the dashboard tab.
+  const [tourReplayPending, setTourReplayPending] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const wallets = useConnectedWallets();
@@ -66,6 +70,7 @@ function AppContent() {
 
   const handleRegistrationComplete = () => {
     setRegistrationJustCompleted(true);
+    setTourReplayPending(true);
   };
 
   const handleTab = (t: Tab) => {
@@ -79,10 +84,13 @@ function AppContent() {
   }, [tab, wallets.anyConnected, isSetup]);
 
   useEffect(() => {
-    if (!registrationJustCompleted || tab !== "dashboard") return;
-    const timer = setTimeout(() => runOnboardingTour(true), 800);
+    if (!tourReplayPending || tab !== "dashboard") return;
+    const timer = setTimeout(() => {
+      setTourReplayPending(false);
+      runOnboardingTour(true);
+    }, 800);
     return () => clearTimeout(timer);
-  }, [registrationJustCompleted, tab]);
+  }, [tourReplayPending, tab]);
 
   const handleDisconnect = () => {
     clearSession();

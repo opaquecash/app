@@ -15,6 +15,13 @@ export function hasCompletedOnboardingTour(): boolean {
 export function runOnboardingTour(force?: boolean): void {
   if (!force && hasCompletedOnboardingTour()) return;
 
+  // Mark done at start, not only on destroy: if the tour is torn down abnormally (a target
+  // element unmounts mid-tour), onDestroyStarted never fires and the tour would re-trigger
+  // on every dashboard visit until a reload.
+  if (typeof window !== "undefined") {
+    localStorage.setItem(TOUR_STORAGE_KEY, "1");
+  }
+
   const d = driver({
     showProgress: true,
     steps: [
