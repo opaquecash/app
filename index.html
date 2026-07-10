@@ -63,7 +63,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="apple-touch-icon" href="/favicon.svg" />
 
-    <!-- Fonts (match docs.opaque.cash) -->
+    <!--
+      Fonts (match docs.opaque.cash).
+      OPQ-031: this Google Fonts stylesheet is third-party and carries no Subresource
+      Integrity (SRI) hash — SRI is impractical here because the returned CSS is
+      user-agent-dependent, so its hash is not stable. The CSP in vercel.json restricts
+      style/font loads to fonts.googleapis.com and fonts.gstatic.com only. To fully remove
+      the external dependency, self-host these fonts under /public and drop the two hosts
+      from the CSP.
+    -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
