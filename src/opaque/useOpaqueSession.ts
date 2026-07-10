@@ -28,6 +28,9 @@ import type { PublicKey, Transaction } from "@solana/web3.js";
 import type { Address, Hex } from "viem";
 import { wagmiConfig } from "./wagmi";
 import { useOpaqueStore, type DerivationSource } from "./store";
+import { useTxHistoryStore } from "../store/txHistoryStore";
+import { useWatchlistStore } from "../hooks/useWatchlist";
+import { useGhostAddressStore, GHOST_ADDRESSES_STORAGE_KEY } from "../store/ghostAddressStore";
 import {
   clearSignatureSession,
   getRememberSignaturePreference,
@@ -237,6 +240,22 @@ export function useOpaqueSession() {
   const disconnect = useCallback(() => {
     clearSignatureSession();
     clearSession();
+    // OPQ-014 / OPQ-015: the tx-history, watchlist, and ghost-address stores hold the
+    // user's private-payment graph (stealth addresses, counterparties, amounts) and the
+    // plaintext ephemeral private keys for ghost receives. Wipe both the in-memory state
+    // and their localStorage keys on disconnect so nothing sensitive survives logout.
+    useTxHistoryStore.getState().clear();
+    useWatchlistStore.getState().clear();
+    useGhostAddressStore.getState().clear();
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.removeItem("opaque-tx-history");
+        localStorage.removeItem("opaque-watchlist");
+        localStorage.removeItem(GHOST_ADDRESSES_STORAGE_KEY);
+      } catch {
+        /* ignore private-mode / quota errors */
+      }
+    }
   }, [clearSession]);
 
   /** Whether write actions on `chain` are possible — requires that chain's wallet connected. */

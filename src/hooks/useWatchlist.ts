@@ -29,6 +29,8 @@ type WatchlistState = {
   unarchive: (cluster: string, address: string) => void;
   getActiveAddresses: (cluster: string) => Address[];
   getEntriesForCluster: (cluster: string) => WatchlistEntry[];
+  /** Wipe all watched addresses (e.g. on wallet disconnect — OPQ-014). */
+  clear: () => void;
 };
 
 export const useWatchlistStore = create<WatchlistState>()(
@@ -88,6 +90,8 @@ export const useWatchlistStore = create<WatchlistState>()(
 
       getEntriesForCluster: (cluster) =>
         get().entries.filter((e) => e.cluster === cluster),
+
+      clear: () => set({ entries: [] }),
     }),
     { name: STORAGE_KEY }
   )

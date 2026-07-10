@@ -61,6 +61,11 @@ type GhostState = {
   setEntries: (entries: GhostEntry[]) => void;
   /** Remove entries missing ephemeralPrivKeyHex (zombies). Call on app mount. */
   sanitizeGhostAddresses: () => void;
+  /**
+   * Wipe all ghost entries and delete them from localStorage. Called on wallet
+   * disconnect (OPQ-015) so the plaintext ephemeral private keys do not survive logout.
+   */
+  clear: () => void;
   /** Find a single entry by stealthAddress and cluster (for withdrawal matching). */
   getEntry: (stealthAddress: string, cluster: string) => GhostEntry | undefined;
   getForCluster: (cluster: string) => GhostEntry[];
@@ -110,6 +115,17 @@ export const useGhostAddressStore = create<GhostState>()((set, get) => ({
     set((state) => ({
       entries: state.entries.filter((e) => !!e.ephemeralPrivKeyHex),
     })),
+
+  clear: () => {
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        /* ignore quota / private mode */
+      }
+    }
+    set({ entries: [] });
+  },
 
   getEntry: (stealthAddress, cluster) =>
     get().entries.find(
