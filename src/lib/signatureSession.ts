@@ -1,3 +1,5 @@
+import { openDB, type IDBPDatabase } from "idb";
+
 type Hex = `0x${string}`;
 
 type SignatureSessionRecord = {
@@ -10,9 +12,22 @@ type SignatureSessionRecord = {
 };
 
 const DATA_KEY = "opaque.signature.session.data.v1";
-const AES_KEY_KEY = "opaque.signature.session.aes.v1";
+// Legacy key: earlier builds stored the raw AES key in sessionStorage beside the ciphertext,
+// so anyone who could read sessionStorage could decrypt the cached setup signature (which
+// derives both spending and viewing keys) — the "encryption" was cosmetic (OPQ-013). We now
+// wrap with a non-extractable WebCrypto key held in IndexedDB, and proactively purge any
+// lingering legacy raw key so an upgrade closes the hole rather than leaving it readable.
+const LEGACY_AES_KEY_KEY = "opaque.signature.session.aes.v1";
 const PREF_KEY = "opaque.signature.session.pref.v1";
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+// The wrapping key lives in IndexedDB as a non-extractable CryptoKey: structured-clone keeps
+// it usable for encrypt/decrypt but its raw bytes can never be read back out, so a storage
+// reader (XSS payload that only exfiltrates values, forensic dump, shared machine) gets the
+// ciphertext but nothing it can decrypt offline.
+const KEY_DB_NAME = "opaque.signature.session";
+const KEY_STORE = "wrap-keys";
+const KEY_ID = "aes-gcm-v1";
 
 function normalizeWalletAddress(address: string): string {
   return address.startsWith("0x") ? address.toLowerCase() : address;
@@ -37,19 +52,56 @@ function base64ToBytes(base64: string): Uint8Array {
   return out;
 }
 
-async function getOrCreateAesKeyRaw(): Promise<Uint8Array | null> {
-  if (typeof window === "undefined") return null;
-  if (!window.crypto?.getRandomValues) return null;
-  const existing = sessionStorage.getItem(AES_KEY_KEY);
-  if (existing) return base64ToBytes(existing);
-  const raw = new Uint8Array(32);
-  window.crypto.getRandomValues(raw);
-  sessionStorage.setItem(AES_KEY_KEY, bytesToBase64(raw));
-  return raw;
+function cryptoAvailable(): boolean {
+  return typeof window !== "undefined" && !!window.crypto?.subtle && typeof indexedDB !== "undefined";
 }
 
-async function importAesKey(raw: Uint8Array): Promise<CryptoKey> {
-  return crypto.subtle.importKey("raw", toArrayBuffer(raw), "AES-GCM", false, ["encrypt", "decrypt"]);
+function keyDb(): Promise<IDBPDatabase> {
+  return openDB(KEY_DB_NAME, 1, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains(KEY_STORE)) db.createObjectStore(KEY_STORE);
+    },
+  });
+}
+
+/** The existing non-extractable wrap key, or null if none has been created yet. */
+async function loadWrapKey(): Promise<CryptoKey | null> {
+  if (!cryptoAvailable()) return null;
+  try {
+    const db = await keyDb();
+    const key = (await db.get(KEY_STORE, KEY_ID)) as CryptoKey | undefined;
+    return key ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Get the wrap key, generating and persisting a fresh non-extractable one on first use. */
+async function getOrCreateWrapKey(): Promise<CryptoKey | null> {
+  const existing = await loadWrapKey();
+  if (existing) return existing;
+  if (!cryptoAvailable()) return null;
+  try {
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ]);
+    const db = await keyDb();
+    await db.put(KEY_STORE, key, KEY_ID);
+    return key;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteWrapKey(): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  try {
+    const db = await keyDb();
+    await db.delete(KEY_STORE, KEY_ID);
+  } catch {
+    /* best-effort */
+  }
 }
 
 export function setRememberSignaturePreference(remember: boolean): void {
@@ -64,9 +116,12 @@ export function getRememberSignaturePreference(): boolean {
 
 export function clearSignatureSession(): void {
   if (typeof window === "undefined") return;
+  // Remove the ciphertext synchronously so the secret is gone the instant we return; the
+  // wrap-key deletion is best-effort in the background (the key alone decrypts nothing).
   sessionStorage.removeItem(DATA_KEY);
-  sessionStorage.removeItem(AES_KEY_KEY);
+  sessionStorage.removeItem(LEGACY_AES_KEY_KEY);
   sessionStorage.removeItem(PREF_KEY);
+  void deleteWrapKey();
 }
 
 export async function saveSignatureSession(params: {
@@ -85,9 +140,11 @@ export async function saveSignatureSession(params: {
     return;
   }
 
-  const rawKey = await getOrCreateAesKeyRaw();
-  if (!rawKey) return;
-  const aesKey = await importAesKey(rawKey);
+  // Never leave a legacy raw key sitting in sessionStorage next to the ciphertext.
+  sessionStorage.removeItem(LEGACY_AES_KEY_KEY);
+
+  const aesKey = await getOrCreateWrapKey();
+  if (!aesKey) return;
 
   const now = Date.now();
   const record: SignatureSessionRecord = {
@@ -119,15 +176,20 @@ export async function loadSignatureSession(params: {
   message: string;
 }): Promise<Hex | null> {
   if (typeof window === "undefined") return null;
+  // Purge any legacy plaintext key from before the IndexedDB migration.
+  sessionStorage.removeItem(LEGACY_AES_KEY_KEY);
   const rawPayload = sessionStorage.getItem(DATA_KEY);
-  const rawKey = sessionStorage.getItem(AES_KEY_KEY);
-  if (!rawPayload || !rawKey) return null;
+  if (!rawPayload) return null;
+  const aesKey = await loadWrapKey();
+  if (!aesKey) {
+    clearSignatureSession();
+    return null;
+  }
 
   try {
     const parsed = JSON.parse(rawPayload) as { iv: string; ciphertext: string };
     const iv = base64ToBytes(parsed.iv);
     const ciphertext = base64ToBytes(parsed.ciphertext);
-    const aesKey = await importAesKey(base64ToBytes(rawKey));
     const decrypted = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: toArrayBuffer(iv) },
       aesKey,
