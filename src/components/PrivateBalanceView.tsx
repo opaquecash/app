@@ -8,7 +8,8 @@ import {
 import { hexToBytes, bytesToHex, shortenAddress } from "../lib/format";
 import { getRpcUrl, getCluster } from "../lib/chain";
 import { NATIVE_ASSET, formatNativeAmount, type ChainKey, type DisplayChain } from "../lib/chainAssets";
-import { SEPOLIA_RPC_URL, evmScanFromBlock } from "../opaque/config";
+import { SEPOLIA_RPC_URL, STARKNET_RPC_URL, evmScanFromBlock } from "../opaque/config";
+import { broadcastStarknetSweep } from "../opaque/starknetSweep";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import { useConnectedWallets } from "../hooks/useConnectedWallets";
 import type { ProtocolStep } from "./ProtocolStepper";
@@ -32,6 +33,10 @@ function isSolanaAddress(a: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isStarknetAddress(a: string): boolean {
+  return /^0x[0-9a-fA-F]{1,64}$/.test(a.trim());
 }
 
 function isAddressForChain(a: string, chain: ChainKey): boolean {
@@ -306,9 +311,60 @@ export function PrivateBalanceView() {
       }
       if (tx.balance <= 0n) return;
       if (tx.chain === "starknet") {
-        setClaimError(
-          "Starknet withdrawals need a connected Starknet wallet, which is not wired into the app yet.",
+        if (!trimmed || !isStarknetAddress(trimmed)) {
+          setClaimError("Enter a valid Starknet destination address.");
+          return;
+        }
+        const reserve = NATIVE_ASSET.starknet.feeBuffer;
+        if (tx.balance <= reserve) {
+          setClaimError(
+            "Balance is too low to cover the Starknet deploy fee — this output cannot be swept without a paymaster.",
+          );
+          return;
+        }
+        const amount = tx.balance - reserve;
+        setClaimingId(tx.id);
+        setClaimError(null);
+        setWithdrawalSteps([
+          { id: "wd-1", status: "wait", label: "Deploying stealth account + sweeping…" },
+        ]);
+        logPush("wasm", "Reconstructing stealth key and signing Starknet sweep…");
+        logPush(
+          "blockchain",
+          `Claim: ${formatNativeAmount(amount, "starknet")} STRK → ${shortenAddress(trimmed)}`,
         );
+        try {
+          const sweepReq = client.buildStarknetSweep({
+            output: { ephemeralPublicKey: tx.ephemeralPublicKey as Hex },
+            destination: trimmed,
+            amount,
+          });
+          const { transferTx } = await broadcastStarknetSweep(sweepReq, tx.balance, STARKNET_RPC_URL);
+          setWithdrawalSteps([{ id: "wd-1", status: "done", label: "Swept to destination." }]);
+          pushTx({
+            cluster,
+            chain: "starknet",
+            kind: "received",
+            counterparty: shortenAddress(tx.address, 10, 0),
+            amountLamports: amount.toString(),
+            tokenSymbol: "STRK",
+            tokenAddress: null,
+            amount: formatNativeAmount(amount, "starknet"),
+            txHash: transferTx,
+            stealthAddress: tx.address,
+          });
+          showToast("Withdrawal successful", {
+            explorerTx: { txSig: transferTx, chain: "starknet" },
+          });
+          setFound((prev) => prev.map((t) => (t.id === tx.id ? { ...t, isSpent: true } : t)));
+          setClaimModalTx((prev) => (prev?.id === tx.id ? null : prev));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setClaimError(msg);
+          setWithdrawalSteps([{ id: "wd-1", status: "error", label: "Sweep failed", detail: msg }]);
+        } finally {
+          setClaimingId(null);
+        }
         return;
       }
       if (!trimmed || !isAddressForChain(trimmed, tx.chain)) {
@@ -460,8 +516,7 @@ export function PrivateBalanceView() {
               .map(({ tx, balanceRaw }) => {
                 const asset = NATIVE_ASSET[tx.chain];
                 const amountStr = formatNativeAmount(balanceRaw, tx.chain);
-                const canWithdraw =
-                  tx.source !== "watch" && !!tx.ephemeralPublicKey && tx.chain !== "starknet";
+                const canWithdraw = tx.source !== "watch" && !!tx.ephemeralPublicKey;
                 const connectedDest =
                   tx.chain === "ethereum" ? wallets.ethereum.address : wallets.solana.address;
                 return (
@@ -536,13 +591,7 @@ export function PrivateBalanceView() {
                         onClick={() => setClaimModalTx(tx)}
                         className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sol-gradient text-white disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:opacity-90"
                       >
-                        {claimingId === tx.id
-                          ? "Withdrawing…"
-                          : canWithdraw
-                            ? "Withdraw"
-                            : tx.chain === "starknet"
-                              ? "Wallet needed"
-                              : "No key"}
+                        {claimingId === tx.id ? "Withdrawing…" : canWithdraw ? "Withdraw" : "No key"}
                       </button>
                     </div>
                     {canWithdraw && (

@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 
-export type ToastExplorerTx = { cluster?: string; txSig: string; chain?: "ethereum" | "solana" };
+export type ToastExplorerTx = { cluster?: string; txSig: string; chain?: "ethereum" | "solana" | "starknet" };
 
 type Toast = {
   id: string;

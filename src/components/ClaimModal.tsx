@@ -73,7 +73,9 @@ export function ClaimModal({
             placeholder={
               tx.chain === "ethereum"
                 ? "Ethereum address (use a fresh address)"
-                : "Solana address (use a fresh address)"
+                : tx.chain === "starknet"
+                  ? "Starknet address (use a fresh address)"
+                  : "Solana address (use a fresh address)"
             }
             className="input-field text-sm"
           />

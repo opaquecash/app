@@ -18,6 +18,12 @@ export const SEPOLIA_RPC_URL =
 export const SOLANA_CLUSTER = getCluster();
 export const SOLANA_RPC_URL = getRpcUrl();
 
+/** Starknet Sepolia JSON-RPC (0.10.x) for the stealth sweep broadcast. Override with
+ * `VITE_STARKNET_RPC_URL`. */
+export const STARKNET_RPC_URL =
+  (import.meta.env.VITE_STARKNET_RPC_URL as string | undefined)?.trim() ||
+  "https://api.zan.top/public/starknet-sepolia/rpc/v0_10";
+
 /** Scope tag for the cached SETUP_MESSAGE signature when keys derive from an Ethereum wallet. */
 export const ETHEREUM_SESSION_SCOPE = `ethereum:${SEPOLIA_CHAIN_ID}`;
 

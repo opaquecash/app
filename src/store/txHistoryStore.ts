@@ -15,7 +15,7 @@ const hasRehydratedRef = { current: false };
 
 export type TxHistoryKind = "sent" | "received" | "ghost" | "trait";
 
-export type TxHistoryChain = "ethereum" | "solana";
+export type TxHistoryChain = "ethereum" | "solana" | "starknet";
 
 export type TxHistoryEntry = {
   id: string;
