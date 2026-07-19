@@ -1,15 +1,22 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { createPublicClient, http, type Address } from "viem";
+import { RpcProvider } from "starknet";
 import { shortenAddress } from "../lib/format";
 import { getRpcUrl, getCluster } from "../lib/chain";
 import { getExplorerTxUrl } from "../lib/explorer";
-import { NATIVE_ASSET, formatNativeAmount, parseNativeAmount, type ChainKey } from "../lib/chainAssets";
+import {
+  NATIVE_ASSET,
+  formatNativeAmount,
+  parseNativeAmount,
+  type ChainKey,
+  type DisplayChain,
+} from "../lib/chainAssets";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import { useConnectedWallets } from "../hooks/useConnectedWallets";
-import { SEPOLIA_RPC_URL } from "../opaque/config";
+import { useStarknetWallet } from "../context/StarknetWalletContext";
+import { SEPOLIA_RPC_URL, STARKNET_RPC_URL } from "../opaque/config";
 import { getConfigForCluster } from "../contracts/contract-config";
-import { ChainToggle } from "./ChainToggle";
 import { ProtocolStepper } from "./ProtocolStepper";
 import type { ProtocolStep } from "./ProtocolStepper";
 import { useProtocolLog } from "../context/ProtocolLogContext";
@@ -23,6 +30,9 @@ const isMetaAddress = (value: string): boolean => {
 /** Name-shaped recipients resolved through the SDK (ONS / ENS / SNS). */
 const isNameInput = (value: string): boolean => /^[^\s]+\.(eth|sol)$/i.test(value);
 
+/** STRK token (Sepolia) — used to read the sender's spendable balance. */
+const STRK_TOKEN = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+
 /** Human label per `resolveRecipient` source tag. */
 const RESOLVE_SOURCE_LABEL: Record<string, string> = {
   "ons-mirror": "ONS via Solana mirror (no Ethereum RPC)",
@@ -35,39 +45,59 @@ const RESOLVE_SOURCE_LABEL: Record<string, string> = {
   "meta-address": "meta-address",
 };
 
+/** The other chain a native announcement can be relayed to (Wormhole). Starknet has no relay. */
 const OTHER_CHAIN_LABEL: Record<ChainKey, string> = {
   ethereum: "Solana",
   solana: "Ethereum",
 };
 
+const SEND_CHAINS: { id: DisplayChain; label: string }[] = [
+  { id: "ethereum", label: "Ethereum" },
+  { id: "solana", label: "Solana" },
+  { id: "starknet", label: "Starknet" },
+];
+
 export function SendView() {
   const { client, isSetup, canActOn, derivationSource } = useOpaqueSession();
   const wallets = useConnectedWallets();
+  const strk = useStarknetWallet();
   const { push: logPush } = useProtocolLog();
   const pushTx = useTxHistoryStore((s) => s.push);
   const cluster = getCluster();
   const currentConfig = getConfigForCluster(cluster);
 
+  // Whether a native send on `c` is possible: its wallet is connected (and on Sepolia for Starknet).
+  const canSend = useCallback(
+    (c: DisplayChain): boolean =>
+      c === "starknet" ? strk.connected && strk.onSepolia : canActOn(c),
+    [strk.connected, strk.onSepolia, canActOn],
+  );
+
   // Default to the derivation-source chain when its wallet can sign, else the first usable chain.
   const usableChains = useMemo(
-    () => (["ethereum", "solana"] as const).filter((c) => canActOn(c)),
-    [canActOn],
+    () => (["ethereum", "solana", "starknet"] as const).filter((c) => canSend(c)),
+    [canSend],
   );
-  const [chain, setChain] = useState<ChainKey>(() =>
-    derivationSource && canActOn(derivationSource) ? derivationSource : usableChains[0] ?? "solana",
+  const [chain, setChain] = useState<DisplayChain>(() =>
+    derivationSource && canSend(derivationSource) ? derivationSource : usableChains[0] ?? "solana",
   );
   useEffect(() => {
     if (!usableChains.includes(chain) && usableChains.length > 0) setChain(usableChains[0]);
   }, [usableChains, chain]);
 
   const asset = NATIVE_ASSET[chain];
-  const senderAddress = chain === "solana" ? wallets.solana.address : wallets.ethereum.address;
+  const senderAddress =
+    chain === "solana"
+      ? wallets.solana.address
+      : chain === "starknet"
+        ? strk.address
+        : wallets.ethereum.address;
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [relayCrossChain, setRelayCrossChain] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
-  const [txChain, setTxChain] = useState<ChainKey>("solana");
+  const [txChain, setTxChain] = useState<DisplayChain>("solana");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [steps, setSteps] = useState<ProtocolStep[]>([]);
@@ -76,6 +106,11 @@ export function SendView() {
   const [resolved, setResolved] = useState<{ metaAddressHex: string; source: string } | null>(null);
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
+
+  // Cross-chain relay is a Wormhole EVM↔Solana feature; Starknet announces locally only. When
+  // Starknet is selected the checkbox is hidden and `relayCrossChain` is ignored by the send.
+  const canRelay = chain !== "starknet";
+  const relayRequested = canRelay && relayCrossChain;
 
   // Resolve name-shaped recipients as the user types (ONS mirror-first, then ENS/SNS),
   // so the sender sees the meta-address and resolution path before sending.
@@ -115,6 +150,15 @@ export function SendView() {
         if (chain === "solana") {
           const connection = new Connection(getRpcUrl(), "confirmed");
           raw = BigInt(await connection.getBalance(new PublicKey(senderAddress)));
+        } else if (chain === "starknet") {
+          const provider = new RpcProvider({ nodeUrl: STARKNET_RPC_URL });
+          const res = await provider.callContract({
+            contractAddress: STRK_TOKEN,
+            entrypoint: "balanceOf",
+            calldata: [senderAddress],
+          });
+          const felts = Array.isArray(res) ? res : (res as { result: string[] }).result;
+          raw = BigInt(felts[0]) + (BigInt(felts[1]) << 128n);
         } else {
           const publicClient = createPublicClient({ transport: http(SEPOLIA_RPC_URL) });
           raw = await publicClient.getBalance({ address: senderAddress as Address });
@@ -161,15 +205,18 @@ export function SendView() {
     setAmount(formattedMaxBalance ?? "0");
   };
 
+  const connectHint = (c: DisplayChain): string =>
+    c === "ethereum"
+      ? "Connect an Ethereum wallet to send on Ethereum."
+      : c === "starknet"
+        ? "Connect a Starknet wallet (on Sepolia) to send on Starknet."
+        : "Connect a Solana wallet to send on Solana.";
+
   const handleSend = async () => {
     setError(null);
     setTxHash(null);
-    if (!client || !canActOn(chain)) {
-      setError(
-        chain === "ethereum"
-          ? "Connect an Ethereum wallet to send on Ethereum."
-          : "Connect a Solana wallet to send on Solana.",
-      );
+    if (!client || !canSend(chain)) {
+      setError(connectHint(chain));
       return;
     }
     if (chain === "solana" && !currentConfig) {
@@ -212,32 +259,53 @@ export function SendView() {
     };
 
     try {
-      addStep(
-        "wait",
-        relayCrossChain
-          ? "Sending transfer + cross-chain announcement…"
-          : "Deriving stealth destination + sending…",
-      );
-      logPush("blockchain", `Preparing stealth ${asset.symbol} transfer + announce`);
+      let resultTxHash: string;
+      let destination: string;
 
-      // One call: derive one-time stealth destination, transfer the native asset, and announce
-      // (announce_with_relay / UAB relay when relaying cross-chain over Wormhole).
-      const result = await client.sendStealthPayment({
-        chain,
-        recipient: recipientMeta,
-        amount: value,
-        announce: true,
-        relay: relayCrossChain,
-      });
+      if (chain === "starknet") {
+        // Starknet is account-abstraction: the SDK builds the (transfer + announce) multicall and
+        // the connected wallet signs/broadcasts it. No SDK-held signer, unlike EVM/Solana.
+        addStep("wait", "Deriving stealth destination + sending…");
+        logPush("blockchain", "Preparing stealth STRK transfer + announce");
+        const built = await client.buildStarknetStealthSend({
+          recipient: recipientMeta,
+          amount: value,
+        });
+        if (!strk.walletAccount) throw new Error("Starknet wallet is not connected.");
+        const res = await strk.walletAccount.execute(built.calls);
+        const provider = new RpcProvider({ nodeUrl: STARKNET_RPC_URL });
+        await provider.waitForTransaction(res.transaction_hash);
+        resultTxHash = res.transaction_hash;
+        destination = built.stealthAddress;
+      } else {
+        addStep(
+          "wait",
+          relayRequested
+            ? "Sending transfer + cross-chain announcement…"
+            : "Deriving stealth destination + sending…",
+        );
+        logPush("blockchain", `Preparing stealth ${asset.symbol} transfer + announce`);
 
-      setTxHash(result.txHash);
-      setTxChain(chain);
-      const destination = result.destination ?? result.stealthAddress;
-      addStep("done", "Transfer confirmed.", result.txHash);
-      if (relayCrossChain) {
-        addStep("done", `Announcement relayed to ${OTHER_CHAIN_LABEL[chain]} via Wormhole.`);
+        // One call: derive one-time stealth destination, transfer the native asset, and announce
+        // (announce_with_relay / UAB relay when relaying cross-chain over Wormhole).
+        const result = await client.sendStealthPayment({
+          chain,
+          recipient: recipientMeta,
+          amount: value,
+          announce: true,
+          relay: relayRequested,
+        });
+        resultTxHash = result.txHash;
+        destination = result.destination ?? result.stealthAddress;
       }
-      logPush("blockchain", `Tx: ${result.txHash.slice(0, 18)}…`);
+
+      setTxHash(resultTxHash);
+      setTxChain(chain);
+      addStep("done", "Transfer confirmed.", resultTxHash);
+      if (relayRequested) {
+        addStep("done", `Announcement relayed to ${OTHER_CHAIN_LABEL[chain as ChainKey]} via Wormhole.`);
+      }
+      logPush("blockchain", `Tx: ${resultTxHash.slice(0, 18)}…`);
 
       pushTx({
         cluster,
@@ -248,7 +316,7 @@ export function SendView() {
         tokenSymbol: asset.symbol,
         tokenAddress: null,
         amount: formatNativeAmount(value, chain),
-        txHash: result.txHash,
+        txHash: resultTxHash,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Send failed";
@@ -275,7 +343,7 @@ export function SendView() {
   if (usableChains.length === 0) {
     return (
       <div className="card max-w-lg mx-auto text-center text-neutral-500">
-        Connect an Ethereum or Solana wallet to send.
+        Connect an Ethereum, Solana, or Starknet wallet to send.
       </div>
     );
   }
@@ -291,12 +359,29 @@ export function SendView() {
     <div className="card max-w-lg mx-auto">
       <div className="flex items-start justify-between gap-3 mb-1">
         <h2 className="text-lg font-semibold text-white">Send {asset.symbol}</h2>
-        <ChainToggle
-          value={chain}
-          onChange={setChain}
-          ethConnected={canActOn("ethereum")}
-          solConnected={canActOn("solana")}
-        />
+        <div className="inline-flex rounded-lg border border-ink-700 bg-ink-900 p-0.5 text-xs">
+          {SEND_CHAINS.map((c) => {
+            const disabled = !canSend(c.id);
+            return (
+              <button
+                key={c.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => setChain(c.id)}
+                title={disabled ? `Connect a ${c.label} wallet to use this chain` : undefined}
+                className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
+                  chain === c.id
+                    ? "bg-sol-purple text-white"
+                    : disabled
+                      ? "text-ink-600 cursor-not-allowed"
+                      : "text-mist hover:text-white"
+                }`}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
       <p className="text-sm text-neutral-500 mb-6">
         Send {asset.symbol} to a stealth meta-address. The app derives a one-time stealth
@@ -346,27 +431,35 @@ export function SendView() {
             </button>
           </div>
           {balanceLoading && <p className="mt-1.5 text-neutral-600 text-xs">Loading balance…</p>}
+          {chain === "starknet" && (
+            <p className="mt-1.5 text-mist/60 text-xs">
+              ~{formatNativeAmount(asset.feeBuffer, "starknet")} STRK is reserved so the recipient can
+              later self-fund the account deploy when they withdraw.
+            </p>
+          )}
           {isInsufficientBalance && formattedMaxBalance != null && (
             <p className="mt-1.5 text-red-400 text-xs">
               Exceeds available balance ({formattedMaxBalance} {asset.symbol})
             </p>
           )}
         </div>
-        <label className="flex items-start gap-2.5 rounded-lg border border-ink-700 bg-ink-900/30 px-3 py-2.5 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={relayCrossChain}
-            onChange={(e) => setRelayCrossChain(e.target.checked)}
-            className="mt-0.5 h-3.5 w-3.5 rounded border-ink-600 bg-ink-900 accent-sol-purple"
-          />
-          <span className="text-xs text-mist">
-            Also relay the announcement to {OTHER_CHAIN_LABEL[chain]} (Wormhole). The recipient sees
-            it on either chain.
-            <span className="block text-mist/60 mt-0.5">
-              No {OTHER_CHAIN_LABEL[chain]} wallet needed to relay from {asset.label}.
+        {canRelay && (
+          <label className="flex items-start gap-2.5 rounded-lg border border-ink-700 bg-ink-900/30 px-3 py-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={relayCrossChain}
+              onChange={(e) => setRelayCrossChain(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 rounded border-ink-600 bg-ink-900 accent-sol-purple"
+            />
+            <span className="text-xs text-mist">
+              Also relay the announcement to {OTHER_CHAIN_LABEL[chain as ChainKey]} (Wormhole). The
+              recipient sees it on either chain.
+              <span className="block text-mist/60 mt-0.5">
+                No {OTHER_CHAIN_LABEL[chain as ChainKey]} wallet needed to relay from {asset.label}.
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+        )}
         {error && <p className="text-error text-sm">{error}</p>}
         {txHash &&
           (() => {

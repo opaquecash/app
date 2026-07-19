@@ -15,6 +15,7 @@ import { isClusterSupported } from "./contracts/contract-config.ts";
 import { LandingPage } from "./components/LandingPage.tsx";
 import { BrandingPage } from "./components/BrandingPage.tsx";
 import { SolanaWalletProviders } from "./context/SolanaWalletProviders.tsx";
+import { StarknetWalletProvider } from "./context/StarknetWalletContext.tsx";
 import { OpaqueProviders } from "./opaque/OpaqueProviders.tsx";
 
 console.log("[Opaque] App bootstrapping…");
@@ -35,6 +36,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <OpaqueProviders>
       <SolanaWalletProviders>
+        <StarknetWalletProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<LandingRoute />} />
@@ -48,6 +50,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </BrowserRouter>
+        </StarknetWalletProvider>
       </SolanaWalletProviders>
     </OpaqueProviders>
   </StrictMode>

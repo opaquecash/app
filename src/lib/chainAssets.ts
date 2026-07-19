@@ -7,9 +7,10 @@
 export type ChainKey = "ethereum" | "solana";
 
 /**
- * Chains the app can scan and display balances for. Starknet is display/scan-only for now:
- * it appears in the unified inbox, but its send/sweep write flows (which need a Starknet
- * wallet) are not wired into the UI yet, so it is deliberately absent from {@link ChainKey}.
+ * Chains the app can scan, display balances for, and run native send/sweep on. Starknet is a
+ * peer here — its send (via a connected Starknet wallet) and sweep (self-funded counterfactual
+ * account) are wired. It stays out of {@link ChainKey} because the credential flows (PSR,
+ * attestations, schemas) remain Ethereum/Solana-only, and those components key off `ChainKey`.
  */
 export type DisplayChain = ChainKey | "starknet";
 

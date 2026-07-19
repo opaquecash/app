@@ -35,6 +35,7 @@
     "buffer": "^6.0.3",
     "driver.js": "^1.4.0",
     "framer-motion": "^12.34.2",
+    "get-starknet": "^3.3.3",
     "idb": "^8.0.3",
     "jszip": "^3.10.1",
     "qrcode.react": "^4.2.0",

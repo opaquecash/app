@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { TestnetBanner } from "./TestnetBanner";
 import { EthConnectButton } from "./EthConnectButton";
 import { SolConnectButton } from "./SolConnectButton";
+import { StarknetConnectButton } from "./StarknetConnectButton";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 
 export type Tab =
@@ -95,6 +96,7 @@ function DesktopNav({
         <div className="relative flex items-center gap-3" ref={dropdownRef}>
           <SolConnectButton />
           <EthConnectButton />
+          <StarknetConnectButton />
           {isSetup && metaAddress && (
             <>
               <div

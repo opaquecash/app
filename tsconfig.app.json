@@ -4,7 +4,9 @@
     "target": "ES2022",
     "baseUrl": ".",
     "paths": {
-      "@wasm/*": ["public/pkg/*"]
+      "@wasm/*": ["public/pkg/*"],
+      "abi-wan-kanabi-v1": ["src/types/abi-wan-kanabi-v1-shim.d.ts"],
+      "abi-wan-kanabi-v1/*": ["src/types/abi-wan-kanabi-v1-shim.d.ts"]
     },
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
