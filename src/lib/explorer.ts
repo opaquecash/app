@@ -5,9 +5,10 @@
 
 import { getCluster, type SolanaCluster } from "./chain";
 
-export type ExplorerChain = "ethereum" | "solana";
+export type ExplorerChain = "ethereum" | "solana" | "starknet";
 
 const SEPOLIA_ETHERSCAN_BASE = "https://sepolia.etherscan.io";
+const STARKNET_VOYAGER_BASE = "https://sepolia.voyager.online";
 
 function getSolanaExplorerBase(): string {
   return "https://explorer.solana.com";
@@ -25,6 +26,7 @@ export function getExplorerTxUrl(
 ): string | null {
   if (!txSignature) return null;
   if (chain === "ethereum") return `${SEPOLIA_ETHERSCAN_BASE}/tx/${txSignature}`;
+  if (chain === "starknet") return `${STARKNET_VOYAGER_BASE}/tx/${txSignature}`;
   const cluster = getCluster();
   return `${getSolanaExplorerBase()}/tx/${txSignature}${clusterParam(cluster)}`;
 }
@@ -35,6 +37,7 @@ export function getExplorerAddressUrl(
 ): string | null {
   if (!address) return null;
   if (chain === "ethereum") return `${SEPOLIA_ETHERSCAN_BASE}/address/${address}`;
+  if (chain === "starknet") return `${STARKNET_VOYAGER_BASE}/contract/${address}`;
   const cluster = getCluster();
   return `${getSolanaExplorerBase()}/address/${address}${clusterParam(cluster)}`;
 }

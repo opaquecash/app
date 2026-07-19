@@ -4,7 +4,7 @@
  */
 
 import { useState } from "react";
-import { getExplorerAddressUrl, getExplorerTxUrl } from "../lib/explorer";
+import { getExplorerAddressUrl, getExplorerTxUrl, type ExplorerChain } from "../lib/explorer";
 
 function truncate(value: string, start = 6, end = 4): string {
   if (value.length <= start + end + 2) return value;
@@ -24,7 +24,7 @@ type ExplorerLinkProps = {
   value: string;
   type?: "address" | "tx";
   /** Which chain's explorer to open. Defaults to Solana. */
-  chain?: "ethereum" | "solana";
+  chain?: ExplorerChain;
   className?: string;
   startChars?: number;
   endChars?: number;

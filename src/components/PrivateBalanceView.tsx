@@ -7,7 +7,7 @@ import {
 } from "@opaquecash/opaque";
 import { hexToBytes, bytesToHex, shortenAddress } from "../lib/format";
 import { getRpcUrl, getCluster } from "../lib/chain";
-import { NATIVE_ASSET, formatNativeAmount, type ChainKey } from "../lib/chainAssets";
+import { NATIVE_ASSET, formatNativeAmount, type ChainKey, type DisplayChain } from "../lib/chainAssets";
 import { SEPOLIA_RPC_URL, evmScanFromBlock } from "../opaque/config";
 import { useOpaqueSession } from "../opaque/useOpaqueSession";
 import { useConnectedWallets } from "../hooks/useConnectedWallets";
@@ -45,7 +45,7 @@ function isAddress(a: string): boolean {
 export type FoundTx = {
   id: string;
   /** Chain this output lives on. */
-  chain: ChainKey;
+  chain: DisplayChain;
   /** Scanner stealth address (0x EVM-style) — used for display + matching. */
   address: string;
   /** Actual account holding the funds (base58 on Solana, 0x on Ethereum). */
@@ -83,7 +83,7 @@ function ghostOutput(stealthAddress: string, ephemeralPrivKeyHex: string): Unifi
 
 export type PortfolioEntry = { tx: FoundTx; balanceRaw: bigint };
 
-const SCAN_CHAINS: ChainKey[] = ["solana", "ethereum"];
+const SCAN_CHAINS: DisplayChain[] = ["solana", "ethereum", "starknet"];
 
 export function PrivateBalanceView() {
   const { client, isSetup } = useOpaqueSession();
@@ -268,7 +268,7 @@ export function PrivateBalanceView() {
 
   const portfolio = useMemo(() => {
     const activeTxs = [...found.filter((tx) => !tx.isSpent), ...ghostTxs];
-    const totals: Record<ChainKey, bigint> = { ethereum: 0n, solana: 0n };
+    const totals: Record<DisplayChain, bigint> = { ethereum: 0n, solana: 0n, starknet: 0n };
     const entries: PortfolioEntry[] = [];
     for (const tx of activeTxs) {
       // Unknown-balance rows stay visible (the payment exists; only its RPC read failed)
@@ -305,6 +305,12 @@ export function PrivateBalanceView() {
         return;
       }
       if (tx.balance <= 0n) return;
+      if (tx.chain === "starknet") {
+        setClaimError(
+          "Starknet withdrawals need a connected Starknet wallet, which is not wired into the app yet.",
+        );
+        return;
+      }
       if (!trimmed || !isAddressForChain(trimmed, tx.chain)) {
         setClaimError(
           tx.chain === "ethereum"
@@ -365,7 +371,10 @@ export function PrivateBalanceView() {
   );
 
   const allEntries = portfolio.entries;
-  const hasFunds = portfolio.totals.ethereum > 0n || portfolio.totals.solana > 0n;
+  const hasFunds =
+    portfolio.totals.ethereum > 0n ||
+    portfolio.totals.solana > 0n ||
+    portfolio.totals.starknet > 0n;
 
   if (!isSetup) {
     return (
@@ -430,7 +439,7 @@ export function PrivateBalanceView() {
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            {(["ethereum", "solana"] as const).map((c) => (
+            {(["ethereum", "solana", "starknet"] as const).map((c) => (
               <div key={c} className="rounded-2xl border border-ink-700 bg-ink-900/30 p-6">
                 <p className="text-mist text-sm">Total {NATIVE_ASSET[c].symbol}</p>
                 <p className="font-display text-2xl font-bold text-white mt-1">
@@ -451,7 +460,8 @@ export function PrivateBalanceView() {
               .map(({ tx, balanceRaw }) => {
                 const asset = NATIVE_ASSET[tx.chain];
                 const amountStr = formatNativeAmount(balanceRaw, tx.chain);
-                const canWithdraw = tx.source !== "watch" && !!tx.ephemeralPublicKey;
+                const canWithdraw =
+                  tx.source !== "watch" && !!tx.ephemeralPublicKey && tx.chain !== "starknet";
                 const connectedDest =
                   tx.chain === "ethereum" ? wallets.ethereum.address : wallets.solana.address;
                 return (
@@ -526,7 +536,13 @@ export function PrivateBalanceView() {
                         onClick={() => setClaimModalTx(tx)}
                         className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sol-gradient text-white disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:opacity-90"
                       >
-                        {claimingId === tx.id ? "Withdrawing…" : canWithdraw ? "Withdraw" : "No key"}
+                        {claimingId === tx.id
+                          ? "Withdrawing…"
+                          : canWithdraw
+                            ? "Withdraw"
+                            : tx.chain === "starknet"
+                              ? "Wallet needed"
+                              : "No key"}
                       </button>
                     </div>
                     {canWithdraw && (

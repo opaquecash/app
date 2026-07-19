@@ -105,6 +105,7 @@ async function buildClient(signature: Hex, s: Signers): Promise<OpaqueClient> {
     rpcUrl: SEPOLIA_RPC_URL,
     wasmModuleSpecifier: WASM_MODULE_SPECIFIER,
     solana: { cluster: SOLANA_CLUSTER, rpcUrl: SOLANA_RPC_URL, connection: s.connection },
+    starknet: {},
   });
 }
 
