@@ -13,8 +13,8 @@
   },
   "dependencies": {
     "@opaquecash/adapter": "^0.2.0",
-    "@opaquecash/deployments": "^0.2.3",
-    "@opaquecash/opaque": "^0.2.12",
+    "@opaquecash/deployments": "0.3.0",
+    "@opaquecash/opaque": "0.3.0",
     "@opaquecash/psr-chain": "^0.2.3",
     "@opaquecash/psr-chain-solana": "^0.2.3",
     "@opaquecash/psr-core": "^0.2.2",
