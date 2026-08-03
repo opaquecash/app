@@ -20,6 +20,7 @@ import { ManageView } from "./components/ManageView";
 import { Layout, type Tab } from "./components/Layout";
 import { NetworkGuard } from "./components/NetworkGuard";
 import { useConnectedWallets } from "./hooks/useConnectedWallets";
+import { useStarknetWallet } from "./context/StarknetWalletContext";
 import { useRegistrationStatus } from "./hooks/useRegistrationStatus";
 import { getCluster } from "./lib/chain";
 import { useVaultStore } from "./store/vaultStore";
@@ -36,6 +37,7 @@ function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const wallets = useConnectedWallets();
+  const starknetWallet = useStarknetWallet();
   const { isSetup, entered, connectedChains, disconnect: clearSession } = useOpaqueSession();
   useOpaqueSessionSync();
   const cluster = getCluster();
@@ -97,6 +99,11 @@ function AppContent() {
     clearVault();
     if (wallets.solana.connected) wallets.solana.disconnect();
     if (wallets.ethereum.connected) wallets.ethereum.disconnect();
+    // Also revoke the Starknet wallet: get-starknet persists its authorization
+    // and silently re-attaches on the next load, which would hand the previous
+    // user's spending account to whoever opens the app next (OPQ-014/015
+    // wipes the payment graph on disconnect for the same reason).
+    if (starknetWallet.connected) void starknetWallet.disconnect();
     setTab("dashboard");
   };
 

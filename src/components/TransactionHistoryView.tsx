@@ -54,7 +54,10 @@ function normalizeEntry(raw: unknown, index: number): TxHistoryEntry | null {
   const tokenSymbol = typeof o.tokenSymbol === "string" ? o.tokenSymbol : "SOL";
   const tokenAddress = o.tokenAddress != null && typeof o.tokenAddress === "string" ? (o.tokenAddress as TxHistoryEntry["tokenAddress"]) : null;
   const amount = typeof o.amount === "string" && o.amount !== "" ? o.amount : formatSol(BigInt(amountLamports || "0"));
-  const chain = o.chain === "ethereum" || o.chain === "solana" ? o.chain : "solana";
+  const chain =
+    o.chain === "ethereum" || o.chain === "solana" || o.chain === "starknet"
+      ? o.chain
+      : "solana";
   return { id, cluster, chain, kind, counterparty, amountLamports, tokenSymbol, tokenAddress, amount, txHash, stealthAddress, timestamp };
 }
 

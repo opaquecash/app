@@ -173,7 +173,11 @@ export function DashboardView({ onNavigate, address, cluster }: DashboardViewPro
                     {tx.kind}
                   </span>
                   <span className="rounded-md border border-ink-700 bg-ink-900/40 px-1.5 py-0.5 uppercase text-[10px]">
-                    {(tx.chain ?? "solana") === "ethereum" ? "ETH" : "SOL"}
+                    {(tx.chain ?? "solana") === "ethereum"
+                      ? "ETH"
+                      : tx.chain === "starknet"
+                        ? "STRK"
+                        : "SOL"}
                   </span>
                   <span className="ml-auto font-mono text-mist">{tx.counterparty}</span>
                 </div>
