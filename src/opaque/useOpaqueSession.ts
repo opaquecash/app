@@ -60,6 +60,15 @@ type Signers = {
   publicKey: PublicKey | null;
   signTransaction: ((tx: Transaction) => Promise<Transaction>) | undefined;
   starknetAccount: WalletAccount | null;
+  /**
+   * The context's REACTIVE address state — not `starknetAccount.address`.
+   * get-starknet keeps one WalletAccount instance across `accountsChanged`
+   * and mutates its address in place, so the object identity (and any
+   * fingerprint derived through it) would never register an account switch.
+   */
+  starknetAddress: string | null;
+  /** Starknet writes are wired only while the wallet is on Sepolia. */
+  starknetOnSepolia: boolean;
 };
 
 /** Identifies which signers a client was built with, so wallet changes trigger a rebuild. */
@@ -69,7 +78,8 @@ function fingerprintSigners(s: Signers): string {
     s.walletClient ? "wc" : "-",
     s.publicKey?.toBase58() ?? "-",
     s.signTransaction ? "st" : "-",
-    s.starknetAccount?.address ?? "-",
+    s.starknetAddress ?? "-",
+    s.starknetOnSepolia ? "sep" : "-",
   ].join("|");
 }
 
@@ -115,8 +125,13 @@ async function buildClient(signature: Hex, s: Signers): Promise<OpaqueClient> {
     starknet: {
       // The app's starknet.js WalletAccount and the SDK's structural account type are
       // nominally distinct across package copies; cast at this one boundary (same as
-      // unifiedWallets above).
-      account: (s.starknetAccount as unknown as StarknetAccountLike) ?? undefined,
+      // unifiedWallets above). A wallet on the wrong network is NOT wired as a
+      // write signer — its execute() would broadcast Sepolia calldata to that
+      // network — but its address still serves wallet-free registry reads.
+      account: s.starknetOnSepolia
+        ? ((s.starknetAccount as unknown as StarknetAccountLike) ?? undefined)
+        : undefined,
+      accountAddress: s.starknetAddress ?? undefined,
       psrVerificationKey: PSR_VKEY_URL,
     },
   });
@@ -128,7 +143,11 @@ export function useOpaqueSession() {
   const { address: ethereumAddress, chainId: ethereumChainId } = useAccount();
   const { data: walletClient } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
-  const { walletAccount: starknetAccount } = useStarknetWallet();
+  const {
+    walletAccount: starknetAccount,
+    address: starknetAddress,
+    onSepolia: starknetOnSepolia,
+  } = useStarknetWallet();
 
   const client = useOpaqueStore((s) => s.client);
   const metaAddress = useOpaqueStore((s) => s.metaAddress);
@@ -227,6 +246,8 @@ export function useOpaqueSession() {
         publicKey,
         signTransaction,
         starknetAccount,
+        starknetAddress,
+        starknetOnSepolia,
       };
       const c = await buildClient(sigHex, s);
       setSession({
@@ -249,6 +270,8 @@ export function useOpaqueSession() {
       switchChainAsync,
       connection,
       starknetAccount,
+      starknetAddress,
+      starknetOnSepolia,
       setSession,
       setStatus,
     ],
@@ -279,16 +302,16 @@ export function useOpaqueSession() {
   const canActOn = useCallback(
     (chain: OpaqueChain): boolean => {
       if (chain === "ethereum") return ethereumAddress != null && walletClient != null;
-      if (chain === "starknet") return starknetAccount != null;
+      if (chain === "starknet") return starknetAccount != null && starknetOnSepolia;
       return publicKey != null && signTransaction != null;
     },
-    [ethereumAddress, walletClient, publicKey, signTransaction, starknetAccount],
+    [ethereumAddress, walletClient, publicKey, signTransaction, starknetAccount, starknetOnSepolia],
   );
 
   const connectedChains: OpaqueChain[] = [
     ...(publicKey != null ? (["solana"] as const) : []),
     ...(ethereumAddress != null ? (["ethereum"] as const) : []),
-    ...(starknetAccount != null ? (["starknet"] as const) : []),
+    ...(starknetAccount != null && starknetOnSepolia ? (["starknet"] as const) : []),
   ];
 
   return {
@@ -318,7 +341,11 @@ export function useOpaqueSessionSync() {
   const { publicKey, signTransaction } = useSolanaWallet();
   const { address: ethereumAddress } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const { walletAccount: starknetAccount } = useStarknetWallet();
+  const {
+    walletAccount: starknetAccount,
+    address: starknetAddress,
+    onSepolia: starknetOnSepolia,
+  } = useStarknetWallet();
   const rebuildingRef = useRef(false);
 
   const client = useOpaqueStore((s) => s.client);
@@ -335,6 +362,8 @@ export function useOpaqueSessionSync() {
       publicKey,
       signTransaction,
       starknetAccount,
+      starknetAddress,
+      starknetOnSepolia,
     };
     const next = fingerprintSigners(s);
     if (next === signerFingerprint || rebuildingRef.current) return;
@@ -355,6 +384,8 @@ export function useOpaqueSessionSync() {
     publicKey,
     signTransaction,
     starknetAccount,
+    starknetAddress,
+    starknetOnSepolia,
     replaceClient,
   ]);
 }
