@@ -292,7 +292,11 @@ export function PayPage() {
                 </div>
                 <ChainToggle
                   value={chain}
-                  onChange={setChain}
+                  // Pay-links stay on the 2-chain send set (no starknet segment shown),
+                  // so narrow the wider toggle union back to ChainKey here.
+                  onChange={(c) => {
+                    if (c !== "starknet") setChain(c);
+                  }}
                   ethConnected={payableChains.includes("ethereum")}
                   solConnected={payableChains.includes("solana")}
                 />

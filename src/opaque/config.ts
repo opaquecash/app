@@ -24,6 +24,13 @@ export const STARKNET_RPC_URL =
   (import.meta.env.VITE_STARKNET_RPC_URL as string | undefined)?.trim() ||
   "https://api.zan.top/public/starknet-sepolia/rpc/v0_10";
 
+/**
+ * Same-origin V2 Groth16 verification key, used to Garaga-encode Starknet proof
+ * submissions. Must stay the exact key the on-chain verifier class was generated
+ * from — served next to the wasm/zkey the prover already loads.
+ */
+export const PSR_VKEY_URL = "/circuits/v2/verification_key.json";
+
 /** Scope tag for the cached SETUP_MESSAGE signature when keys derive from an Ethereum wallet. */
 export const ETHEREUM_SESSION_SCOPE = `ethereum:${SEPOLIA_CHAIN_ID}`;
 

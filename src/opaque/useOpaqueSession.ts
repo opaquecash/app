@@ -6,9 +6,10 @@
  * Chain-neutral: the user derives keys from whichever wallet they choose — Ethereum
  * (`personal_sign` via wagmi) or Solana (`signMessage` via the wallet adapter). The two
  * signatures produce DIFFERENT keys (different HKDF inputs), so the derivation source is an
- * explicit identity choice, never silently switched. Both chains' signers are threaded into the
- * client whenever their wallet is connected; writes on a chain require that chain's wallet
- * (`canActOn`). The 30-minute encrypted signature cache (`lib/signatureSession`) avoids re-signing.
+ * explicit identity choice, never silently switched. Every connected wallet's signer is threaded
+ * into the client — including the Starknet spending account, which is never a derivation source —
+ * and writes on a chain require that chain's wallet (`canActOn`). The 30-minute encrypted
+ * signature cache (`lib/signatureSession`) avoids re-signing.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -21,11 +22,14 @@ import {
   requestSetupSignature,
   type EvmUnifiedSigner,
   type SolanaUnifiedSigner,
+  type StarknetAccountLike,
   type UnifiedSigner,
 } from "@opaquecash/opaque";
 import type { Connection } from "@solana/web3.js";
 import type { PublicKey, Transaction } from "@solana/web3.js";
+import type { WalletAccount } from "starknet";
 import type { Address, Hex } from "viem";
+import { useStarknetWallet } from "../context/StarknetWalletContext";
 import { wagmiConfig } from "./wagmi";
 import { useOpaqueStore, type DerivationSource } from "./store";
 import { useTxHistoryStore } from "../store/txHistoryStore";
@@ -39,6 +43,7 @@ import {
 } from "../lib/signatureSession";
 import {
   ETHEREUM_SESSION_SCOPE,
+  PSR_VKEY_URL,
   SEPOLIA_CHAIN_ID,
   SEPOLIA_RPC_URL,
   SOLANA_CLUSTER,
@@ -46,7 +51,7 @@ import {
   WASM_MODULE_SPECIFIER,
 } from "./config";
 
-export type OpaqueChain = "ethereum" | "solana";
+export type OpaqueChain = "ethereum" | "solana" | "starknet";
 
 type Signers = {
   connection: Connection;
@@ -54,6 +59,7 @@ type Signers = {
   walletClient: unknown;
   publicKey: PublicKey | null;
   signTransaction: ((tx: Transaction) => Promise<Transaction>) | undefined;
+  starknetAccount: WalletAccount | null;
 };
 
 /** Identifies which signers a client was built with, so wallet changes trigger a rebuild. */
@@ -63,6 +69,7 @@ function fingerprintSigners(s: Signers): string {
     s.walletClient ? "wc" : "-",
     s.publicKey?.toBase58() ?? "-",
     s.signTransaction ? "st" : "-",
+    s.starknetAccount?.address ?? "-",
   ].join("|");
 }
 
@@ -105,7 +112,13 @@ async function buildClient(signature: Hex, s: Signers): Promise<OpaqueClient> {
     rpcUrl: SEPOLIA_RPC_URL,
     wasmModuleSpecifier: WASM_MODULE_SPECIFIER,
     solana: { cluster: SOLANA_CLUSTER, rpcUrl: SOLANA_RPC_URL, connection: s.connection },
-    starknet: {},
+    starknet: {
+      // The app's starknet.js WalletAccount and the SDK's structural account type are
+      // nominally distinct across package copies; cast at this one boundary (same as
+      // unifiedWallets above).
+      account: (s.starknetAccount as unknown as StarknetAccountLike) ?? undefined,
+      psrVerificationKey: PSR_VKEY_URL,
+    },
   });
 }
 
@@ -115,6 +128,7 @@ export function useOpaqueSession() {
   const { address: ethereumAddress, chainId: ethereumChainId } = useAccount();
   const { data: walletClient } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
+  const { walletAccount: starknetAccount } = useStarknetWallet();
 
   const client = useOpaqueStore((s) => s.client);
   const metaAddress = useOpaqueStore((s) => s.metaAddress);
@@ -212,6 +226,7 @@ export function useOpaqueSession() {
         walletClient: evmWalletClient,
         publicKey,
         signTransaction,
+        starknetAccount,
       };
       const c = await buildClient(sigHex, s);
       setSession({
@@ -233,6 +248,7 @@ export function useOpaqueSession() {
       ethereumChainId,
       switchChainAsync,
       connection,
+      starknetAccount,
       setSession,
       setStatus,
     ],
@@ -263,14 +279,16 @@ export function useOpaqueSession() {
   const canActOn = useCallback(
     (chain: OpaqueChain): boolean => {
       if (chain === "ethereum") return ethereumAddress != null && walletClient != null;
+      if (chain === "starknet") return starknetAccount != null;
       return publicKey != null && signTransaction != null;
     },
-    [ethereumAddress, walletClient, publicKey, signTransaction],
+    [ethereumAddress, walletClient, publicKey, signTransaction, starknetAccount],
   );
 
   const connectedChains: OpaqueChain[] = [
     ...(publicKey != null ? (["solana"] as const) : []),
     ...(ethereumAddress != null ? (["ethereum"] as const) : []),
+    ...(starknetAccount != null ? (["starknet"] as const) : []),
   ];
 
   return {
@@ -300,6 +318,7 @@ export function useOpaqueSessionSync() {
   const { publicKey, signTransaction } = useSolanaWallet();
   const { address: ethereumAddress } = useAccount();
   const { data: walletClient } = useWalletClient();
+  const { walletAccount: starknetAccount } = useStarknetWallet();
   const rebuildingRef = useRef(false);
 
   const client = useOpaqueStore((s) => s.client);
@@ -315,6 +334,7 @@ export function useOpaqueSessionSync() {
       walletClient: walletClient ?? null,
       publicKey,
       signTransaction,
+      starknetAccount,
     };
     const next = fingerprintSigners(s);
     if (next === signerFingerprint || rebuildingRef.current) return;
@@ -334,6 +354,7 @@ export function useOpaqueSessionSync() {
     walletClient,
     publicKey,
     signTransaction,
+    starknetAccount,
     replaceClient,
   ]);
 }

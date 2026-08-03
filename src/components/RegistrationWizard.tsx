@@ -19,6 +19,7 @@ type ChainPhase = "pending" | "registering" | "done" | "error";
 const CHAIN_LABEL: Record<OpaqueChain, string> = {
   ethereum: "Ethereum (Sepolia)",
   solana: "Solana",
+  starknet: "Starknet (Sepolia)",
 };
 
 function toErrorMessage(value: unknown): string {

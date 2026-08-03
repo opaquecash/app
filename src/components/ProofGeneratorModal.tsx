@@ -24,7 +24,12 @@ interface ProofGeneratorModalProps {
 
 export function ProofGeneratorModal({ trait, onClose }: ProofGeneratorModalProps) {
   const { client, isSetup } = useOpaqueSession();
-  const { chain, setChain, ethConnected, solConnected } = usePsrChain(trait.chain);
+  // Traits are discovered on Ethereum/Solana, but the proof can also be SUBMITTED to the
+  // live Starknet verifier — eligibility travels cross-chain with the V2 merkle root.
+  const { chain, setChain, ethConnected, solConnected, starknetConnected } = usePsrChain(
+    trait.chain,
+    { includeStarknet: true },
+  );
   const [step, setStep] = useState<ProofStep>("setup");
   const [externalNullifier, setExternalNullifier] = useState("");
   const [proof, setProof] = useState<ProofData | null>(null);
@@ -163,7 +168,7 @@ export function ProofGeneratorModal({ trait, onClose }: ProofGeneratorModalProps
               </div>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-mist">Submit to</p>
-                <ChainToggle value={chain} onChange={setChain} ethConnected={ethConnected} solConnected={solConnected} />
+                <ChainToggle value={chain} onChange={setChain} ethConnected={ethConnected} solConnected={solConnected} starknetConnected={starknetConnected} />
               </div>
               <div className="flex gap-3">
                 <button type="button" onClick={handleCopy} className="flex-1 rounded-xl border border-ink-700 bg-ink-800 py-2.5 text-sm font-medium text-white hover:bg-ink-700 transition-colors">{copied ? "Copied!" : "Copy Proof"}</button>
